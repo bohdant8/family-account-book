@@ -3,6 +3,14 @@
  */
 
 const App = {
+    // Currency configuration (rates are updated from server)
+    currencies: {
+        CNY: { symbol: '¥', name: 'Chinese Yuan', rate: 1 },
+        JPY: { symbol: '¥', name: 'Japanese Yen', rate: 0.05 },
+        USD: { symbol: '$', name: 'US Dollar', rate: 7.25 }
+    },
+    baseCurrency: 'CNY',
+
     // Application state
     state: {
         currentTab: 'dashboard',
@@ -10,6 +18,9 @@ const App = {
         categories: [],
         members: [],
         summary: {},
+        monthlyData: {},
+        exchangeHistory: [],
+        selectedYear: new Date().getFullYear(),
         filters: {
             startDate: null,
             endDate: null,
@@ -98,6 +109,13 @@ const App = {
         const result = await this.api('stats.php', 'GET', params);
         if (result.success) {
             this.state.summary = result.data;
+            // Update currencies from server
+            if (result.data.currencies) {
+                this.currencies = result.data.currencies;
+            }
+            if (result.data.base_currency) {
+                this.baseCurrency = result.data.base_currency;
+            }
         }
     },
 
@@ -158,6 +176,45 @@ const App = {
         document.getElementById('endDate')?.addEventListener('change', (e) => {
             this.state.filters.endDate = e.target.value;
             this.refreshData();
+        });
+
+        // Year navigation for monthly chart
+        document.getElementById('prevYearBtn')?.addEventListener('click', () => {
+            this.state.selectedYear--;
+            this.loadMonthlyData();
+        });
+
+        document.getElementById('nextYearBtn')?.addEventListener('click', () => {
+            this.state.selectedYear++;
+            this.loadMonthlyData();
+        });
+
+        // Currency exchange
+        document.getElementById('openExchangeBtn')?.addEventListener('click', () => {
+            this.openExchangeModal();
+        });
+
+        document.getElementById('exchangeForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.saveExchange();
+        });
+
+        // Live exchange calculation
+        document.getElementById('exchangeFromAmount')?.addEventListener('input', () => {
+            this.calculateExchange();
+        });
+        document.getElementById('exchangeFromCurrency')?.addEventListener('change', () => {
+            this.calculateExchange();
+        });
+        document.getElementById('exchangeToCurrency')?.addEventListener('change', () => {
+            this.calculateExchange();
+        });
+
+        // Close exchange modal on backdrop click
+        document.getElementById('exchangeModal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'exchangeModal') {
+                this.closeExchangeModal();
+            }
         });
     },
 
@@ -220,6 +277,7 @@ const App = {
             title.textContent = 'Edit Transaction';
             document.getElementById('transactionId').value = transaction.id;
             document.getElementById('transactionAmount').value = transaction.amount;
+            document.getElementById('transactionCurrency').value = transaction.currency || 'CNY';
             document.getElementById('transactionDescription').value = transaction.description || '';
             document.getElementById('transactionDate').value = transaction.transaction_date;
             document.getElementById('transactionMember').value = transaction.member || '';
@@ -234,6 +292,7 @@ const App = {
             title.textContent = 'Add Transaction';
             document.getElementById('transactionId').value = '';
             document.getElementById('transactionDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('transactionCurrency').value = 'CNY';
             
             // Default to expense
             document.querySelectorAll('.type-toggle-btn').forEach(b => {
@@ -281,6 +340,7 @@ const App = {
         const data = {
             category_id: categoryId,
             amount: parseFloat(document.getElementById('transactionAmount').value),
+            currency: document.getElementById('transactionCurrency').value,
             description: document.getElementById('transactionDescription').value,
             transaction_date: document.getElementById('transactionDate').value,
             member: document.getElementById('transactionMember').value || null
@@ -289,9 +349,17 @@ const App = {
         const id = document.getElementById('transactionId').value;
         if (id) {
             data.id = id;
-            await this.api('transactions.php', 'PUT', data);
+            await fetch('api/transactions.php', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
         } else {
-            await this.api('transactions.php', 'POST', data);
+            await fetch('api/transactions.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
         }
         
         this.closeModal();
@@ -301,7 +369,11 @@ const App = {
     async deleteTransaction(id) {
         if (!confirm('Are you sure you want to delete this transaction?')) return;
         
-        await this.api('transactions.php', 'DELETE', { id });
+        await fetch('api/transactions.php', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
         await this.refreshData();
     },
 
@@ -349,18 +421,84 @@ const App = {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
         document.getElementById('dashboardTab').classList.remove('hidden');
         
-        // Update summary cards
-        const { income = 0, expense = 0, balance = 0 } = this.state.summary;
-        
-        document.getElementById('summaryIncome').textContent = this.formatCurrency(income);
-        document.getElementById('summaryExpense').textContent = this.formatCurrency(expense);
-        document.getElementById('summaryBalance').textContent = this.formatCurrency(balance);
+        // Render multi-currency summary
+        this.renderSummaryCards();
         
         // Render recent transactions
         this.renderTransactionList(
             document.getElementById('recentTransactions'),
             this.state.transactions.slice(0, 10)
         );
+    },
+
+    renderSummaryCards() {
+        const { 
+            period_by_currency = {}, 
+            period_total = {},
+            all_time_by_currency = {},
+            all_time_total = {}
+        } = this.state.summary;
+        
+        const baseCurrency = this.baseCurrency || 'CNY';
+        
+        // Render period income by currency
+        const incomeContainer = document.getElementById('summaryIncome');
+        const expenseContainer = document.getElementById('summaryExpense');
+        const balanceContainer = document.getElementById('summaryBalance');
+        
+        // Format period income - show converted total
+        if (period_total.income !== undefined) {
+            let incomeHtml = `<div class="currency-total">${this.formatCurrency(period_total.income, baseCurrency)}</div>`;
+            // Show breakdown if multiple currencies
+            const currencies = Object.keys(period_by_currency).filter(c => period_by_currency[c].income > 0);
+            if (currencies.length > 1) {
+                incomeHtml += `<div class="currency-breakdown">`;
+                for (const currency of currencies) {
+                    incomeHtml += `<span class="breakdown-item">${currency}: ${this.formatCurrency(period_by_currency[currency].income, currency)}</span>`;
+                }
+                incomeHtml += `</div>`;
+            }
+            incomeContainer.innerHTML = incomeHtml;
+        } else {
+            incomeContainer.innerHTML = this.formatCurrency(0, baseCurrency);
+        }
+        
+        // Format period expense - show converted total
+        if (period_total.expense !== undefined) {
+            let expenseHtml = `<div class="currency-total">${this.formatCurrency(period_total.expense, baseCurrency)}</div>`;
+            // Show breakdown if multiple currencies
+            const currencies = Object.keys(period_by_currency).filter(c => period_by_currency[c].expense > 0);
+            if (currencies.length > 1) {
+                expenseHtml += `<div class="currency-breakdown">`;
+                for (const currency of currencies) {
+                    expenseHtml += `<span class="breakdown-item">${currency}: ${this.formatCurrency(period_by_currency[currency].expense, currency)}</span>`;
+                }
+                expenseHtml += `</div>`;
+            }
+            expenseContainer.innerHTML = expenseHtml;
+        } else {
+            expenseContainer.innerHTML = this.formatCurrency(0, baseCurrency);
+        }
+        
+        // Format all-time balance - show converted total
+        if (all_time_total.balance !== undefined) {
+            const balanceClass = all_time_total.balance >= 0 ? 'positive' : 'negative';
+            let balanceHtml = `<div class="currency-total ${balanceClass}">${this.formatCurrency(all_time_total.balance, baseCurrency)}</div>`;
+            // Show breakdown if multiple currencies
+            const currencies = Object.keys(all_time_by_currency);
+            if (currencies.length > 1) {
+                balanceHtml += `<div class="currency-breakdown">`;
+                for (const currency of currencies) {
+                    const bal = all_time_by_currency[currency].balance;
+                    const cls = bal >= 0 ? 'positive' : 'negative';
+                    balanceHtml += `<span class="breakdown-item ${cls}">${currency}: ${this.formatCurrency(bal, currency)}</span>`;
+                }
+                balanceHtml += `</div>`;
+            }
+            balanceContainer.innerHTML = balanceHtml;
+        } else {
+            balanceContainer.innerHTML = this.formatCurrency(0, baseCurrency);
+        }
     },
 
     renderTransactions() {
@@ -400,7 +538,7 @@ const App = {
                             <div class="transaction-member">${t.member || ''}</div>
                         </div>
                         <div class="transaction-amount ${t.type}">
-                            ${this.formatCurrency(t.amount)}
+                            ${this.formatCurrency(t.amount, t.currency)}
                         </div>
                         <div class="transaction-actions">
                             <button class="btn btn-sm btn-secondary" onclick="App.openTransactionModal(${JSON.stringify(t).replace(/"/g, '&quot;')})">Edit</button>
@@ -416,7 +554,80 @@ const App = {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
         document.getElementById('reportsTab').classList.remove('hidden');
         
+        this.loadMonthlyData();
         this.loadCategoryStats();
+    },
+
+    async loadMonthlyData() {
+        const result = await this.api('stats.php', 'GET', {
+            action: 'monthly',
+            year: this.state.selectedYear
+        });
+        
+        if (result.success) {
+            this.state.monthlyData = result.data;
+            this.renderMonthlyChart();
+        }
+    },
+
+    renderMonthlyChart() {
+        const container = document.getElementById('monthlyChart');
+        const yearDisplay = document.getElementById('selectedYear');
+        
+        if (!container) return;
+        
+        // Update year display
+        if (yearDisplay) {
+            yearDisplay.textContent = this.state.selectedYear;
+        }
+        
+        const data = this.state.monthlyData;
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        
+        // Find max value for scaling
+        let maxValue = 0;
+        for (const [month, values] of Object.entries(data)) {
+            maxValue = Math.max(maxValue, values.income || 0, values.expense || 0);
+        }
+        
+        // If no data, show empty state
+        if (maxValue === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📊</div>
+                    <div class="empty-state-text">No data for ${this.state.selectedYear}</div>
+                </div>
+            `;
+            return;
+        }
+        
+        // Render chart
+        container.innerHTML = `
+            <div class="monthly-chart">
+                ${months.map((month, index) => {
+                    const monthKey = String(index + 1).padStart(2, '0');
+                    const monthData = data[monthKey] || { income: 0, expense: 0 };
+                    const incomeHeight = maxValue > 0 ? (monthData.income / maxValue) * 160 : 0;
+                    const expenseHeight = maxValue > 0 ? (monthData.expense / maxValue) * 160 : 0;
+                    
+                    return `
+                        <div class="month-bar-group">
+                            <div class="month-bars">
+                                <div class="month-bar income" 
+                                     style="height: ${Math.max(incomeHeight, 4)}px"
+                                     data-amount="${this.formatCurrency(monthData.income, 'CNY')}">
+                                </div>
+                                <div class="month-bar expense" 
+                                     style="height: ${Math.max(expenseHeight, 4)}px"
+                                     data-amount="${this.formatCurrency(monthData.expense, 'CNY')}">
+                                </div>
+                            </div>
+                            <div class="month-label">${month}</div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
     },
 
     async loadCategoryStats() {
@@ -463,27 +674,218 @@ const App = {
                         <div>
                             <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-xs);">
                                 <span>${item.icon} ${item.name}</span>
-                                <span style="font-family: var(--font-mono);">${this.formatCurrency(item.total)} (${percent}%)</span>
+                                <span style="font-weight: 600;">${this.formatCurrency(item.total, 'CNY')} (${percent}%)</span>
                             </div>
-                            <div style="background: var(--color-parchment); border-radius: 4px; height: 8px; overflow: hidden;">
+                            <div style="background: var(--color-bg); border-radius: 4px; height: 8px; overflow: hidden;">
                                 <div style="background: ${item.color}; height: 100%; width: ${percent}%; transition: width 0.3s ease;"></div>
                             </div>
                         </div>
                     `;
                 }).join('')}
             </div>
-            <div style="margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 1px dashed var(--color-border); text-align: right;">
-                <strong>Total: ${this.formatCurrency(total)}</strong>
+            <div style="margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 2px dashed var(--color-accent); text-align: right;">
+                <strong>Total: ${this.formatCurrency(total, 'CNY')}</strong>
             </div>
         `;
     },
 
-    renderSettings() {
+    async renderSettings() {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
         document.getElementById('settingsTab').classList.remove('hidden');
         
         this.renderCategoriesList();
         this.renderMembersList();
+        this.renderExchangeRates();
+        
+        // Load and render exchange history
+        await this.loadExchangeHistory();
+        this.renderExchangeHistory();
+    },
+
+    renderExchangeRates() {
+        const container = document.getElementById('exchangeRatesList');
+        if (!container) return;
+        
+        const baseCurrency = this.baseCurrency || 'CNY';
+        
+        container.innerHTML = `
+            <p class="exchange-note">All amounts are converted to <strong>${baseCurrency}</strong> for total calculations. Click a rate to edit:</p>
+            <div class="exchange-rates-grid">
+                ${Object.entries(this.currencies).map(([code, info]) => `
+                    <div class="exchange-rate-item ${code === baseCurrency ? 'base-currency' : ''}" data-currency="${code}">
+                        <span class="rate-currency">${code}</span>
+                        <span class="rate-name">${info.name || code}</span>
+                        ${code === baseCurrency ? 
+                            `<span class="rate-value base">Base Currency</span>` :
+                            `<div class="rate-edit">
+                                <span class="rate-label">1 ${code} =</span>
+                                <input type="number" class="rate-input" value="${info.rate || 1}" step="0.0001" min="0.0001" data-currency="${code}">
+                                <span class="rate-label">${baseCurrency}</span>
+                                <button class="btn btn-sm btn-success rate-save" onclick="App.updateExchangeRate('${code}')">✓</button>
+                            </div>`
+                        }
+                    </div>
+                `).join('')}
+            </div>
+            <p class="exchange-disclaimer">💡 Tip: Update rates regularly for accurate calculations.</p>
+        `;
+    },
+
+    async updateExchangeRate(currency) {
+        const input = document.querySelector(`.rate-input[data-currency="${currency}"]`);
+        if (!input) return;
+        
+        const rate = parseFloat(input.value);
+        if (isNaN(rate) || rate <= 0) {
+            alert('Please enter a valid positive rate');
+            return;
+        }
+        
+        const response = await fetch('api/exchange.php?action=rates', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currency, rate })
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            this.currencies[currency].rate = rate;
+            // Refresh summary to recalculate with new rate
+            await this.loadSummary();
+            this.render();
+        } else {
+            alert(result.error || 'Failed to update rate');
+        }
+    },
+
+    async loadExchangeHistory() {
+        const result = await this.api('exchange.php?action=history');
+        if (result.success) {
+            this.state.exchangeHistory = result.data;
+        }
+    },
+
+    renderExchangeHistory() {
+        const container = document.getElementById('exchangeHistory');
+        if (!container) return;
+        
+        const history = this.state.exchangeHistory;
+        
+        if (!history || history.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">💱</div>
+                    <div class="empty-state-text">No currency exchanges yet</div>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = `
+            <div class="exchange-history-list">
+                ${history.map(ex => `
+                    <div class="exchange-history-item">
+                        <div class="exchange-info">
+                            <span class="exchange-amounts">
+                                ${this.formatCurrency(ex.from_amount, ex.from_currency)} 
+                                <span class="exchange-arrow">→</span> 
+                                ${this.formatCurrency(ex.to_amount, ex.to_currency)}
+                            </span>
+                            <span class="exchange-meta">
+                                ${this.formatDate(ex.exchange_date)} 
+                                ${ex.member ? `• ${ex.member}` : ''}
+                                ${ex.description ? `• ${ex.description}` : ''}
+                            </span>
+                        </div>
+                        <span class="exchange-rate-badge">Rate: ${parseFloat(ex.exchange_rate).toFixed(4)}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    },
+
+    openExchangeModal() {
+        const modal = document.getElementById('exchangeModal');
+        document.getElementById('exchangeForm').reset();
+        document.getElementById('exchangeDate').value = new Date().toISOString().split('T')[0];
+        
+        // Populate member select
+        const memberSelect = document.getElementById('exchangeMember');
+        memberSelect.innerHTML = '<option value="">Select member (optional)</option>' +
+            this.state.members.map(m => `<option value="${m.name}">${m.avatar} ${m.name}</option>`).join('');
+        
+        this.calculateExchange();
+        modal.classList.add('active');
+    },
+
+    closeExchangeModal() {
+        document.getElementById('exchangeModal').classList.remove('active');
+    },
+
+    calculateExchange() {
+        const fromCurrency = document.getElementById('exchangeFromCurrency').value;
+        const toCurrency = document.getElementById('exchangeToCurrency').value;
+        const fromAmount = parseFloat(document.getElementById('exchangeFromAmount').value) || 0;
+        
+        const fromRate = this.currencies[fromCurrency]?.rate || 1;
+        const toRate = this.currencies[toCurrency]?.rate || 1;
+        
+        // Convert: from -> CNY -> to
+        const cnyAmount = fromAmount * fromRate;
+        const toAmount = cnyAmount / toRate;
+        
+        document.getElementById('exchangeToAmount').value = toAmount.toFixed(2);
+        document.getElementById('exchangePreviewFrom').textContent = `${fromAmount.toFixed(2)} ${fromCurrency}`;
+        document.getElementById('exchangePreviewTo').textContent = `${toAmount.toFixed(2)} ${toCurrency}`;
+        
+        const exchangeRate = fromRate / toRate;
+        document.getElementById('currentRateInfo').textContent = 
+            `Current rate: 1 ${fromCurrency} = ${exchangeRate.toFixed(4)} ${toCurrency}`;
+    },
+
+    async saveExchange() {
+        const data = {
+            from_currency: document.getElementById('exchangeFromCurrency').value,
+            to_currency: document.getElementById('exchangeToCurrency').value,
+            from_amount: parseFloat(document.getElementById('exchangeFromAmount').value),
+            to_amount: parseFloat(document.getElementById('exchangeToAmount').value),
+            exchange_date: document.getElementById('exchangeDate').value,
+            member: document.getElementById('exchangeMember').value || null,
+            description: document.getElementById('exchangeDescription').value || null
+        };
+        
+        if (data.from_currency === data.to_currency) {
+            alert('Please select different currencies');
+            return;
+        }
+        
+        if (!data.from_amount || data.from_amount <= 0) {
+            alert('Please enter a valid amount');
+            return;
+        }
+        
+        const response = await fetch('api/exchange.php?action=exchange', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            this.closeExchangeModal();
+            // Refresh both exchange history and summary (for updated balance)
+            await Promise.all([
+                this.loadExchangeHistory(),
+                this.loadSummary()
+            ]);
+            this.renderExchangeHistory();
+            // Update dashboard if visible
+            if (this.state.currentTab === 'dashboard') {
+                this.renderSummaryCards();
+            }
+        } else {
+            alert(result.error || 'Failed to process exchange');
+        }
     },
 
     renderCategoriesList() {
@@ -491,7 +893,7 @@ const App = {
         const expenseCategories = this.state.categories.filter(c => c.type === 'expense');
         
         const renderList = (categories, type) => categories.map(c => `
-            <div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-sm); border-bottom: 1px solid var(--color-parchment);">
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-sm); border-bottom: 1px solid var(--color-bg);">
                 <div style="display: flex; align-items: center; gap: var(--space-sm);">
                     <span style="font-size: 1.25rem;">${c.icon}</span>
                     <span>${c.name}</span>
@@ -508,7 +910,7 @@ const App = {
     renderMembersList() {
         const container = document.getElementById('membersList');
         container.innerHTML = this.state.members.map(m => `
-            <div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-sm); border-bottom: 1px solid var(--color-parchment);">
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-sm); border-bottom: 1px solid var(--color-bg);">
                 <div style="display: flex; align-items: center; gap: var(--space-sm);">
                     <span style="font-size: 1.25rem;">${m.avatar}</span>
                     <span>${m.name}</span>
@@ -521,7 +923,13 @@ const App = {
     async deleteCategory(id) {
         if (!confirm('Are you sure? Categories with transactions cannot be deleted.')) return;
         
-        const result = await this.api('categories.php', 'DELETE', { id });
+        const response = await fetch('api/categories.php', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        const result = await response.json();
+        
         if (result.error) {
             alert(result.error);
             return;
@@ -534,22 +942,32 @@ const App = {
     async deleteMember(id) {
         if (!confirm('Are you sure you want to delete this member?')) return;
         
-        await this.api('members.php', 'DELETE', { id });
+        await fetch('api/members.php', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
         await this.loadMembers();
         this.renderSettings();
     },
 
     // Utility functions
-    formatCurrency(amount) {
-        return '¥' + parseFloat(amount).toLocaleString('zh-CN', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
+    formatCurrency(amount, currency = 'CNY') {
+        const config = this.currencies[currency] || this.currencies.CNY;
+        const value = parseFloat(amount);
+        
+        // JPY doesn't use decimal places
+        const decimals = currency === 'JPY' ? 0 : 2;
+        
+        return config.symbol + value.toLocaleString('en-US', {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
         });
     },
 
     formatDate(dateStr) {
         const date = new Date(dateStr);
-        return date.toLocaleDateString('zh-CN', {
+        return date.toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric'
         });
@@ -558,4 +976,3 @@ const App = {
 
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => App.init());
-

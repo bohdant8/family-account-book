@@ -46,15 +46,15 @@
             <!-- Summary Cards -->
             <div class="summary-grid">
                 <div class="summary-card income">
-                    <div class="summary-label">Income</div>
+                    <div class="summary-label">📅 Period Income</div>
                     <div class="summary-value" id="summaryIncome">¥0.00</div>
                 </div>
                 <div class="summary-card expense">
-                    <div class="summary-label">Expense</div>
+                    <div class="summary-label">📅 Period Expense</div>
                     <div class="summary-value" id="summaryExpense">¥0.00</div>
                 </div>
                 <div class="summary-card balance">
-                    <div class="summary-label">Balance</div>
+                    <div class="summary-label">💰 Total Balance</div>
                     <div class="summary-value" id="summaryBalance">¥0.00</div>
                 </div>
             </div>
@@ -84,6 +84,26 @@
 
         <!-- Reports Tab -->
         <div id="reportsTab" class="tab-content hidden">
+            <!-- Monthly Trend Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">📊 Monthly Trend</h2>
+                    <div class="year-selector">
+                        <button class="btn btn-sm btn-secondary" id="prevYearBtn">◀</button>
+                        <span id="selectedYear" class="year-display">2025</span>
+                        <button class="btn btn-sm btn-secondary" id="nextYearBtn">▶</button>
+                    </div>
+                </div>
+                <div id="monthlyChart" class="monthly-chart-container">
+                    <div class="loading">Loading chart</div>
+                </div>
+                <div class="chart-legend">
+                    <span class="legend-item"><span class="legend-color income"></span> Income</span>
+                    <span class="legend-item"><span class="legend-color expense"></span> Expense</span>
+                </div>
+            </div>
+
+            <!-- Category Breakdown -->
             <div class="card">
                 <div id="expenseChart" class="chart-container">
                     <div class="loading">Loading chart</div>
@@ -120,6 +140,27 @@
                 </div>
                 <div id="membersList"></div>
             </div>
+
+            <!-- Currency Exchange -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">💱 Currency Exchange</h2>
+                    <button class="btn btn-primary btn-sm" id="openExchangeBtn">+ New Exchange</button>
+                </div>
+                <div id="exchangeHistory">
+                    <div class="loading">Loading exchange history</div>
+                </div>
+            </div>
+
+            <!-- Exchange Rates -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">📈 Exchange Rates</h2>
+                </div>
+                <div id="exchangeRatesList" class="exchange-rates-info">
+                    <p class="exchange-note">All amounts are converted to CNY for total calculations.</p>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -146,10 +187,20 @@
                     <div class="category-grid" id="categorySelect"></div>
                 </div>
                 
-                <!-- Amount -->
-                <div class="form-group">
-                    <label class="form-label" for="transactionAmount">Amount</label>
-                    <input type="number" id="transactionAmount" class="form-input" step="0.01" min="0" required placeholder="0.00">
+                <!-- Amount and Currency -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="transactionAmount">Amount</label>
+                        <input type="number" id="transactionAmount" class="form-input" step="0.01" min="0" required placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="transactionCurrency">Currency</label>
+                        <select id="transactionCurrency" class="form-select">
+                            <option value="CNY">CNY (¥)</option>
+                            <option value="JPY">JPY (¥)</option>
+                            <option value="USD">USD ($)</option>
+                        </select>
+                    </div>
                 </div>
                 
                 <!-- Date -->
@@ -175,6 +226,80 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Transaction</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Currency Exchange Modal -->
+    <div class="modal-backdrop" id="exchangeModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">💱 Currency Exchange</h3>
+                <button class="modal-close" onclick="App.closeExchangeModal()">&times;</button>
+            </div>
+            
+            <form id="exchangeForm">
+                <div class="exchange-preview">
+                    <span id="exchangePreviewFrom">0.00 CNY</span>
+                    <span class="exchange-arrow">→</span>
+                    <span id="exchangePreviewTo">0.00 USD</span>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">From Currency</label>
+                        <select id="exchangeFromCurrency" class="form-select">
+                            <option value="CNY">CNY (¥)</option>
+                            <option value="JPY">JPY (¥)</option>
+                            <option value="USD">USD ($)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">To Currency</label>
+                        <select id="exchangeToCurrency" class="form-select">
+                            <option value="CNY">CNY (¥)</option>
+                            <option value="JPY">JPY (¥)</option>
+                            <option value="USD" selected>USD ($)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Amount to Exchange</label>
+                        <input type="number" id="exchangeFromAmount" class="form-input" step="0.01" min="0" required placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">You'll Receive (approx)</label>
+                        <input type="number" id="exchangeToAmount" class="form-input" step="0.01" min="0" placeholder="Auto-calculated">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Exchange Date</label>
+                    <input type="date" id="exchangeDate" class="form-input" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Family Member</label>
+                    <select id="exchangeMember" class="form-select">
+                        <option value="">Select member (optional)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Note</label>
+                    <input type="text" id="exchangeDescription" class="form-input" placeholder="e.g., Bank exchange, Travel money">
+                </div>
+
+                <div class="exchange-rate-info" id="currentRateInfo">
+                    Current rate: 1 CNY = 1.00 CNY
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="App.closeExchangeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">💱 Exchange</button>
                 </div>
             </form>
         </div>

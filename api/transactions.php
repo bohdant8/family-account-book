@@ -134,14 +134,18 @@ function createTransaction() {
         }
     }
     
+    // Default currency to CNY if not provided
+    $currency = $data['currency'] ?? 'CNY';
+    
     $stmt = $pdo->prepare("
-        INSERT INTO transactions (category_id, amount, description, transaction_date, member)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO transactions (category_id, amount, currency, description, transaction_date, member)
+        VALUES (?, ?, ?, ?, ?, ?)
     ");
     
     $stmt->execute([
         $data['category_id'],
         $data['amount'],
+        $currency,
         $data['description'] ?? '',
         $data['transaction_date'],
         $data['member'] ?? null
@@ -172,15 +176,19 @@ function updateTransaction() {
         return;
     }
     
+    // Default currency to CNY if not provided
+    $currency = $data['currency'] ?? 'CNY';
+    
     $stmt = $pdo->prepare("
         UPDATE transactions 
-        SET category_id = ?, amount = ?, description = ?, transaction_date = ?, member = ?, updated_at = CURRENT_TIMESTAMP
+        SET category_id = ?, amount = ?, currency = ?, description = ?, transaction_date = ?, member = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
     ");
     
     $stmt->execute([
         $data['category_id'],
         $data['amount'],
+        $currency,
         $data['description'] ?? '',
         $data['transaction_date'],
         $data['member'] ?? null,

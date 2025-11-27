@@ -56,6 +56,7 @@ class Database {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 category_id INTEGER NOT NULL,
                 amount DECIMAL(10,2) NOT NULL,
+                currency VARCHAR(3) DEFAULT 'CNY',
                 description TEXT,
                 transaction_date DATE NOT NULL,
                 member VARCHAR(100),
@@ -64,6 +65,13 @@ class Database {
                 FOREIGN KEY (category_id) REFERENCES categories(id)
             )
         ");
+        
+        // Add currency column if it doesn't exist (migration for existing databases)
+        try {
+            $this->pdo->exec("ALTER TABLE transactions ADD COLUMN currency VARCHAR(3) DEFAULT 'CNY'");
+        } catch (PDOException $e) {
+            // Column already exists, ignore
+        }
 
         // Create family members table
         $this->pdo->exec("
@@ -74,6 +82,48 @@ class Database {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ");
+
+        // Create exchange rates table (for dynamic rates)
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS exchange_rates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                currency VARCHAR(3) NOT NULL UNIQUE,
+                rate DECIMAL(10,6) NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+
+        // Create currency exchanges table (for exchange transactions)
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS currency_exchanges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_currency VARCHAR(3) NOT NULL,
+                to_currency VARCHAR(3) NOT NULL,
+                from_amount DECIMAL(10,2) NOT NULL,
+                to_amount DECIMAL(10,2) NOT NULL,
+                exchange_rate DECIMAL(10,6) NOT NULL,
+                exchange_date DATE NOT NULL,
+                member VARCHAR(100),
+                description TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+
+        // Initialize default exchange rates if empty
+        $stmt = $this->pdo->query("SELECT COUNT(*) as count FROM exchange_rates");
+        $result = $stmt->fetch();
+        
+        if ($result['count'] == 0) {
+            $defaultRates = [
+                ['CNY', 1.0],
+                ['JPY', 0.052],
+                ['USD', 7.25],
+            ];
+            $stmt = $this->pdo->prepare("INSERT INTO exchange_rates (currency, rate) VALUES (?, ?)");
+            foreach ($defaultRates as $rate) {
+                $stmt->execute($rate);
+            }
+        }
 
         // Insert default categories if empty
         $stmt = $this->pdo->query("SELECT COUNT(*) as count FROM categories");
@@ -139,60 +189,40 @@ class Database {
         $currentMonth = date('m');
         
         // Dummy transactions for the past 3 months
+        // Format: [category_id, amount, description, date, member, currency]
         $dummyTransactions = [
-            // This month - various expenses and income
-            // Salary (category_id: 1)
-            [1, 15000.00, 'Monthly salary', $currentYear . '-' . $currentMonth . '-05', 'Dad'],
-            [1, 8000.00, 'Monthly salary', $currentYear . '-' . $currentMonth . '-05', 'Mom'],
+            // This month - CNY transactions (main currency)
+            [1, 15000.00, 'Monthly salary', $currentYear . '-' . $currentMonth . '-05', 'Dad', 'CNY'],
+            [1, 8000.00, 'Monthly salary', $currentYear . '-' . $currentMonth . '-05', 'Mom', 'CNY'],
+            [6, 45.50, 'Breakfast at cafe', $currentYear . '-' . $currentMonth . '-02', 'Dad', 'CNY'],
+            [6, 128.00, 'Family dinner', $currentYear . '-' . $currentMonth . '-06', 'Mom', 'CNY'],
+            [6, 35.00, 'Lunch at school', $currentYear . '-' . $currentMonth . '-07', 'Child', 'CNY'],
+            [6, 256.80, 'Grocery shopping', $currentYear . '-' . $currentMonth . '-10', 'Mom', 'CNY'],
+            [6, 89.00, 'Weekend brunch', $currentYear . '-' . $currentMonth . '-14', 'Dad', 'CNY'],
+            [7, 500.00, 'Monthly metro card', $currentYear . '-' . $currentMonth . '-01', 'Dad', 'CNY'],
+            [7, 300.00, 'Monthly metro card', $currentYear . '-' . $currentMonth . '-01', 'Mom', 'CNY'],
+            [8, 299.00, 'New shoes', $currentYear . '-' . $currentMonth . '-08', 'Child', 'CNY'],
+            [8, 450.00, 'Winter jacket', $currentYear . '-' . $currentMonth . '-11', 'Mom', 'CNY'],
+            [9, 280.00, 'Electricity bill', $currentYear . '-' . $currentMonth . '-10', 'Dad', 'CNY'],
+            [9, 85.00, 'Water bill', $currentYear . '-' . $currentMonth . '-10', 'Dad', 'CNY'],
+            [10, 5500.00, 'Monthly rent', $currentYear . '-' . $currentMonth . '-01', 'Dad', 'CNY'],
+            [11, 120.00, 'Doctor visit', $currentYear . '-' . $currentMonth . '-09', 'Child', 'CNY'],
+            [12, 2500.00, 'Tuition fee', $currentYear . '-' . $currentMonth . '-03', 'Child', 'CNY'],
+            [13, 180.00, 'Movie tickets', $currentYear . '-' . $currentMonth . '-13', 'Dad', 'CNY'],
+            [2, 3000.00, 'Project bonus', $currentYear . '-' . $currentMonth . '-15', 'Dad', 'CNY'],
+            [4, 800.00, 'Freelance work', $currentYear . '-' . $currentMonth . '-18', 'Mom', 'CNY'],
             
-            // Food & Dining (category_id: 6)
-            [6, 45.50, 'Breakfast at cafe', $currentYear . '-' . $currentMonth . '-02', 'Dad'],
-            [6, 128.00, 'Family dinner', $currentYear . '-' . $currentMonth . '-06', 'Mom'],
-            [6, 35.00, 'Lunch at school', $currentYear . '-' . $currentMonth . '-07', 'Child'],
-            [6, 256.80, 'Grocery shopping', $currentYear . '-' . $currentMonth . '-10', 'Mom'],
-            [6, 89.00, 'Weekend brunch', $currentYear . '-' . $currentMonth . '-14', 'Dad'],
-            [6, 178.50, 'Grocery shopping', $currentYear . '-' . $currentMonth . '-18', 'Mom'],
-            [6, 65.00, 'Snacks and drinks', $currentYear . '-' . $currentMonth . '-20', 'Child'],
-            [6, 320.00, 'Restaurant dinner', $currentYear . '-' . $currentMonth . '-22', 'Dad'],
+            // JPY transactions (Japanese purchases)
+            [8, 5980.00, 'Japanese skincare', $currentYear . '-' . $currentMonth . '-12', 'Mom', 'JPY'],
+            [6, 1200.00, 'Ramen lunch', $currentYear . '-' . $currentMonth . '-12', 'Dad', 'JPY'],
+            [8, 3500.00, 'Anime merchandise', $currentYear . '-' . $currentMonth . '-14', 'Child', 'JPY'],
+            [13, 8800.00, 'Concert ticket Japan', $currentYear . '-' . $currentMonth . '-18', 'Mom', 'JPY'],
             
-            // Transportation (category_id: 7)
-            [7, 500.00, 'Monthly metro card', $currentYear . '-' . $currentMonth . '-01', 'Dad'],
-            [7, 300.00, 'Monthly metro card', $currentYear . '-' . $currentMonth . '-01', 'Mom'],
-            [7, 150.00, 'Gas refuel', $currentYear . '-' . $currentMonth . '-12', 'Dad'],
-            [7, 35.00, 'Taxi to airport', $currentYear . '-' . $currentMonth . '-15', 'Mom'],
-            
-            // Shopping (category_id: 8)
-            [8, 299.00, 'New shoes', $currentYear . '-' . $currentMonth . '-08', 'Child'],
-            [8, 450.00, 'Winter jacket', $currentYear . '-' . $currentMonth . '-11', 'Mom'],
-            [8, 89.00, 'Books', $currentYear . '-' . $currentMonth . '-16', 'Child'],
-            
-            // Utilities (category_id: 9)
-            [9, 280.00, 'Electricity bill', $currentYear . '-' . $currentMonth . '-10', 'Dad'],
-            [9, 85.00, 'Water bill', $currentYear . '-' . $currentMonth . '-10', 'Dad'],
-            [9, 150.00, 'Internet bill', $currentYear . '-' . $currentMonth . '-12', 'Dad'],
-            [9, 180.00, 'Phone bills', $currentYear . '-' . $currentMonth . '-12', 'Mom'],
-            
-            // Housing (category_id: 10)
-            [10, 5500.00, 'Monthly rent', $currentYear . '-' . $currentMonth . '-01', 'Dad'],
-            
-            // Healthcare (category_id: 11)
-            [11, 120.00, 'Doctor visit', $currentYear . '-' . $currentMonth . '-09', 'Child'],
-            [11, 85.00, 'Pharmacy', $currentYear . '-' . $currentMonth . '-09', 'Mom'],
-            
-            // Education (category_id: 12)
-            [12, 2500.00, 'Tuition fee', $currentYear . '-' . $currentMonth . '-03', 'Child'],
-            [12, 350.00, 'Piano lessons', $currentYear . '-' . $currentMonth . '-15', 'Child'],
-            
-            // Entertainment (category_id: 13)
-            [13, 180.00, 'Movie tickets', $currentYear . '-' . $currentMonth . '-13', 'Dad'],
-            [13, 99.00, 'Streaming subscription', $currentYear . '-' . $currentMonth . '-01', 'Dad'],
-            [13, 250.00, 'Concert tickets', $currentYear . '-' . $currentMonth . '-20', 'Mom'],
-            
-            // Bonus income (category_id: 2)
-            [2, 3000.00, 'Project bonus', $currentYear . '-' . $currentMonth . '-15', 'Dad'],
-            
-            // Side Income (category_id: 4)
-            [4, 800.00, 'Freelance work', $currentYear . '-' . $currentMonth . '-18', 'Mom'],
+            // USD transactions (international)
+            [13, 15.99, 'Netflix subscription', $currentYear . '-' . $currentMonth . '-01', 'Dad', 'USD'],
+            [8, 49.99, 'Amazon purchase', $currentYear . '-' . $currentMonth . '-10', 'Mom', 'USD'],
+            [12, 29.99, 'Online course', $currentYear . '-' . $currentMonth . '-15', 'Child', 'USD'],
+            [4, 150.00, 'Freelance payment', $currentYear . '-' . $currentMonth . '-20', 'Dad', 'USD'],
         ];
         
         // Add transactions from last month
@@ -200,20 +230,18 @@ class Database {
         $lastMonthYear = $currentMonth == '01' ? $currentYear - 1 : $currentYear;
         
         $lastMonthTransactions = [
-            [1, 15000.00, 'Monthly salary', $lastMonthYear . '-' . $lastMonth . '-05', 'Dad'],
-            [1, 8000.00, 'Monthly salary', $lastMonthYear . '-' . $lastMonth . '-05', 'Mom'],
-            [10, 5500.00, 'Monthly rent', $lastMonthYear . '-' . $lastMonth . '-01', 'Dad'],
-            [6, 890.00, 'Grocery shopping', $lastMonthYear . '-' . $lastMonth . '-08', 'Mom'],
-            [6, 450.00, 'Restaurant meals', $lastMonthYear . '-' . $lastMonth . '-15', 'Dad'],
-            [7, 500.00, 'Monthly metro card', $lastMonthYear . '-' . $lastMonth . '-01', 'Dad'],
-            [7, 300.00, 'Monthly metro card', $lastMonthYear . '-' . $lastMonth . '-01', 'Mom'],
-            [9, 650.00, 'Utility bills', $lastMonthYear . '-' . $lastMonth . '-10', 'Dad'],
-            [8, 1200.00, 'New laptop bag', $lastMonthYear . '-' . $lastMonth . '-12', 'Dad'],
-            [12, 2500.00, 'Tuition fee', $lastMonthYear . '-' . $lastMonth . '-03', 'Child'],
-            [13, 99.00, 'Streaming subscription', $lastMonthYear . '-' . $lastMonth . '-01', 'Dad'],
-            [11, 350.00, 'Annual checkup', $lastMonthYear . '-' . $lastMonth . '-20', 'Mom'],
-            [3, 1500.00, 'Stock dividend', $lastMonthYear . '-' . $lastMonth . '-25', 'Dad'],
-            [14, 2800.00, 'Weekend trip', $lastMonthYear . '-' . $lastMonth . '-22', 'Mom'],
+            [1, 15000.00, 'Monthly salary', $lastMonthYear . '-' . $lastMonth . '-05', 'Dad', 'CNY'],
+            [1, 8000.00, 'Monthly salary', $lastMonthYear . '-' . $lastMonth . '-05', 'Mom', 'CNY'],
+            [10, 5500.00, 'Monthly rent', $lastMonthYear . '-' . $lastMonth . '-01', 'Dad', 'CNY'],
+            [6, 890.00, 'Grocery shopping', $lastMonthYear . '-' . $lastMonth . '-08', 'Mom', 'CNY'],
+            [7, 500.00, 'Monthly metro card', $lastMonthYear . '-' . $lastMonth . '-01', 'Dad', 'CNY'],
+            [9, 650.00, 'Utility bills', $lastMonthYear . '-' . $lastMonth . '-10', 'Dad', 'CNY'],
+            [12, 2500.00, 'Tuition fee', $lastMonthYear . '-' . $lastMonth . '-03', 'Child', 'CNY'],
+            [3, 1500.00, 'Stock dividend', $lastMonthYear . '-' . $lastMonth . '-25', 'Dad', 'CNY'],
+            [14, 2800.00, 'Weekend trip', $lastMonthYear . '-' . $lastMonth . '-22', 'Mom', 'CNY'],
+            // USD last month
+            [13, 15.99, 'Netflix subscription', $lastMonthYear . '-' . $lastMonth . '-01', 'Dad', 'USD'],
+            [4, 200.00, 'Consulting fee', $lastMonthYear . '-' . $lastMonth . '-15', 'Dad', 'USD'],
         ];
         
         // Add transactions from 2 months ago
@@ -221,15 +249,15 @@ class Database {
         $twoMonthsAgoYear = $currentMonth <= '02' ? $currentYear - 1 : $currentYear;
         
         $twoMonthsAgoTransactions = [
-            [1, 15000.00, 'Monthly salary', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-05', 'Dad'],
-            [1, 8000.00, 'Monthly salary', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-05', 'Mom'],
-            [10, 5500.00, 'Monthly rent', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-01', 'Dad'],
-            [6, 720.00, 'Grocery shopping', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-10', 'Mom'],
-            [7, 800.00, 'Transportation', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-01', 'Dad'],
-            [9, 580.00, 'Utility bills', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-10', 'Dad'],
-            [12, 2500.00, 'Tuition fee', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-03', 'Child'],
-            [13, 99.00, 'Streaming subscription', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-01', 'Dad'],
-            [2, 5000.00, 'Year-end bonus', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-28', 'Mom'],
+            [1, 15000.00, 'Monthly salary', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-05', 'Dad', 'CNY'],
+            [1, 8000.00, 'Monthly salary', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-05', 'Mom', 'CNY'],
+            [10, 5500.00, 'Monthly rent', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-01', 'Dad', 'CNY'],
+            [6, 720.00, 'Grocery shopping', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-10', 'Mom', 'CNY'],
+            [7, 800.00, 'Transportation', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-01', 'Dad', 'CNY'],
+            [12, 2500.00, 'Tuition fee', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-03', 'Child', 'CNY'],
+            [2, 5000.00, 'Year-end bonus', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-28', 'Mom', 'CNY'],
+            // JPY 2 months ago
+            [14, 85000.00, 'Japan trip expenses', $twoMonthsAgoYear . '-' . $twoMonthsAgo . '-20', 'Dad', 'JPY'],
         ];
         
         // Merge all transactions
@@ -237,8 +265,8 @@ class Database {
         
         // Insert all transactions
         $stmt = $this->pdo->prepare("
-            INSERT INTO transactions (category_id, amount, description, transaction_date, member)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO transactions (category_id, amount, description, transaction_date, member, currency)
+            VALUES (?, ?, ?, ?, ?, ?)
         ");
         
         foreach ($allTransactions as $transaction) {

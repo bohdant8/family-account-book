@@ -49,29 +49,62 @@ try {
 
 function getSummary() {
     $pdo = db();
+    $baseCurrency = BASE_CURRENCY;
+    
+    // Get exchange rates from database
+    $stmt = $pdo->query("SELECT currency, rate FROM exchange_rates");
+    $ratesResult = $stmt->fetchAll();
+    $currencies = [];
+    foreach ($ratesResult as $row) {
+        $currencies[$row['currency']] = [
+            'symbol' => $row['currency'] === 'USD' ? '$' : '¥',
+            'rate' => (float)$row['rate']
+        ];
+    }
+    // Fallback to config if no rates in DB
+    if (empty($currencies)) {
+        $currencies = CURRENCIES;
+    }
     
     $startDate = $_GET['start_date'] ?? date('Y-m-01');
     $endDate = $_GET['end_date'] ?? date('Y-m-t');
     
-    // Total income
+    // Period totals by currency
     $stmt = $pdo->prepare("
-        SELECT COALESCE(SUM(t.amount), 0) as total
+        SELECT 
+            COALESCE(t.currency, 'CNY') as currency,
+            c.type,
+            COALESCE(SUM(t.amount), 0) as total
         FROM transactions t
         JOIN categories c ON t.category_id = c.id
-        WHERE c.type = 'income' AND t.transaction_date BETWEEN ? AND ?
+        WHERE t.transaction_date BETWEEN ? AND ?
+        GROUP BY t.currency, c.type
     ");
     $stmt->execute([$startDate, $endDate]);
-    $income = $stmt->fetch()['total'];
+    $periodResults = $stmt->fetchAll();
     
-    // Total expense
-    $stmt = $pdo->prepare("
-        SELECT COALESCE(SUM(t.amount), 0) as total
-        FROM transactions t
-        JOIN categories c ON t.category_id = c.id
-        WHERE c.type = 'expense' AND t.transaction_date BETWEEN ? AND ?
-    ");
-    $stmt->execute([$startDate, $endDate]);
-    $expense = $stmt->fetch()['total'];
+    // Organize period data by currency and calculate converted totals
+    $periodByCurrency = [];
+    $periodTotalIncome = 0;
+    $periodTotalExpense = 0;
+    
+    foreach ($periodResults as $row) {
+        $cur = $row['currency'];
+        $rate = $currencies[$cur]['rate'] ?? 1;
+        
+        if (!isset($periodByCurrency[$cur])) {
+            $periodByCurrency[$cur] = ['income' => 0, 'expense' => 0];
+        }
+        $periodByCurrency[$cur][$row['type']] = (float)$row['total'];
+        
+        // Convert to base currency
+        $convertedAmount = (float)$row['total'] * $rate;
+        if ($row['type'] === 'income') {
+            $periodTotalIncome += $convertedAmount;
+        } else {
+            $periodTotalExpense += $convertedAmount;
+        }
+    }
     
     // Transaction count
     $stmt = $pdo->prepare("
@@ -82,24 +115,95 @@ function getSummary() {
     $stmt->execute([$startDate, $endDate]);
     $count = $stmt->fetch()['count'];
     
-    // All time balance
+    // All time balance by currency (from transactions)
     $stmt = $pdo->query("
         SELECT 
+            COALESCE(t.currency, 'CNY') as currency,
             COALESCE(SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END), 0) as total_income,
             COALESCE(SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END), 0) as total_expense
         FROM transactions t
         JOIN categories c ON t.category_id = c.id
+        GROUP BY t.currency
     ");
-    $allTime = $stmt->fetch();
+    $allTimeResults = $stmt->fetchAll();
     
+    // Organize all-time data by currency
+    $allTimeByCurrency = [];
+    $allTimeTotalIncome = 0;
+    $allTimeTotalExpense = 0;
+    
+    foreach ($allTimeResults as $row) {
+        $cur = $row['currency'];
+        $rate = $currencies[$cur]['rate'] ?? 1;
+        
+        $allTimeByCurrency[$cur] = [
+            'income' => (float)$row['total_income'],
+            'expense' => (float)$row['total_expense'],
+            'balance' => (float)$row['total_income'] - (float)$row['total_expense']
+        ];
+        
+        // Convert to base currency
+        $allTimeTotalIncome += (float)$row['total_income'] * $rate;
+        $allTimeTotalExpense += (float)$row['total_expense'] * $rate;
+    }
+    
+    // Include currency exchanges in balance
+    // Exchanges: subtract from_amount from from_currency, add to_amount to to_currency
+    $stmt = $pdo->query("
+        SELECT from_currency, to_currency, 
+               SUM(from_amount) as total_from, 
+               SUM(to_amount) as total_to
+        FROM currency_exchanges
+        GROUP BY from_currency, to_currency
+    ");
+    $exchanges = $stmt->fetchAll();
+    
+    foreach ($exchanges as $ex) {
+        $fromCur = $ex['from_currency'];
+        $toCur = $ex['to_currency'];
+        $fromAmount = (float)$ex['total_from'];
+        $toAmount = (float)$ex['total_to'];
+        
+        // Initialize currency entries if not exists
+        if (!isset($allTimeByCurrency[$fromCur])) {
+            $allTimeByCurrency[$fromCur] = ['income' => 0, 'expense' => 0, 'balance' => 0];
+        }
+        if (!isset($allTimeByCurrency[$toCur])) {
+            $allTimeByCurrency[$toCur] = ['income' => 0, 'expense' => 0, 'balance' => 0];
+        }
+        
+        // Subtract from source currency, add to target currency
+        $allTimeByCurrency[$fromCur]['balance'] -= $fromAmount;
+        $allTimeByCurrency[$toCur]['balance'] += $toAmount;
+    }
+    
+    // Recalculate total balance including exchanges (convert each currency to base)
+    $allTimeTotalBalance = 0;
+    foreach ($allTimeByCurrency as $cur => $data) {
+        $rate = $currencies[$cur]['rate'] ?? 1;
+        $allTimeTotalBalance += $data['balance'] * $rate;
+    }
+
     echo json_encode([
         'success' => true,
         'data' => [
-            'income' => (float)$income,
-            'expense' => (float)$expense,
-            'balance' => (float)$income - (float)$expense,
+            'period_by_currency' => $periodByCurrency,
+            'period_total' => [
+                'income' => round($periodTotalIncome, 2),
+                'expense' => round($periodTotalExpense, 2),
+                'balance' => round($periodTotalIncome - $periodTotalExpense, 2),
+                'currency' => $baseCurrency
+            ],
             'transaction_count' => (int)$count,
-            'all_time_balance' => (float)$allTime['total_income'] - (float)$allTime['total_expense'],
+            'all_time_by_currency' => $allTimeByCurrency,
+            'all_time_total' => [
+                'income' => round($allTimeTotalIncome, 2),
+                'expense' => round($allTimeTotalExpense, 2),
+                'balance' => round($allTimeTotalBalance, 2),
+                'currency' => $baseCurrency
+            ],
+            'currencies' => $currencies,
+            'base_currency' => $baseCurrency,
             'period' => [
                 'start' => $startDate,
                 'end' => $endDate
