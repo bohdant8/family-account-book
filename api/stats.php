@@ -47,6 +47,35 @@ try {
     echo json_encode(['error' => $e->getMessage()]);
 }
 
+/**
+ * Get historical exchange rate for a specific date
+ * Returns the most recent rate on or before the given date
+ * Falls back to current rate if no history exists
+ */
+function getHistoricalRate($pdo, $currency, $date, $currentRates) {
+    // CNY is always 1
+    if ($currency === 'CNY') {
+        return 1.0;
+    }
+    
+    // Try to get historical rate
+    $stmt = $pdo->prepare("
+        SELECT rate FROM exchange_rate_history 
+        WHERE currency = ? AND effective_date <= ?
+        ORDER BY effective_date DESC
+        LIMIT 1
+    ");
+    $stmt->execute([$currency, $date]);
+    $result = $stmt->fetch();
+    
+    if ($result) {
+        return (float)$result['rate'];
+    }
+    
+    // Fallback to current rate if no history
+    return $currentRates[$currency]['rate'] ?? 1.0;
+}
+
 function getSummary() {
     $pdo = db();
     $baseCurrency = BASE_CURRENCY;
@@ -69,37 +98,43 @@ function getSummary() {
     $startDate = $_GET['start_date'] ?? date('Y-m-01');
     $endDate = $_GET['end_date'] ?? date('Y-m-t');
     
-    // Period totals by currency
+    // Get individual transactions for period (to use historical rates)
     $stmt = $pdo->prepare("
         SELECT 
+            t.amount,
             COALESCE(t.currency, 'CNY') as currency,
-            c.type,
-            COALESCE(SUM(t.amount), 0) as total
+            t.transaction_date,
+            c.type
         FROM transactions t
         JOIN categories c ON t.category_id = c.id
         WHERE t.transaction_date BETWEEN ? AND ?
-        GROUP BY t.currency, c.type
     ");
     $stmt->execute([$startDate, $endDate]);
-    $periodResults = $stmt->fetchAll();
+    $periodTransactions = $stmt->fetchAll();
     
-    // Organize period data by currency and calculate converted totals
+    // Calculate period totals using historical rates
     $periodByCurrency = [];
     $periodTotalIncome = 0;
     $periodTotalExpense = 0;
     
-    foreach ($periodResults as $row) {
-        $cur = $row['currency'];
-        $rate = $currencies[$cur]['rate'] ?? 1;
+    foreach ($periodTransactions as $tx) {
+        $cur = $tx['currency'];
+        $amount = (float)$tx['amount'];
+        $type = $tx['type'];
+        $date = $tx['transaction_date'];
         
+        // Get historical rate for this transaction's date
+        $historicalRate = getHistoricalRate($pdo, $cur, $date, $currencies);
+        
+        // Track by currency (raw amounts)
         if (!isset($periodByCurrency[$cur])) {
             $periodByCurrency[$cur] = ['income' => 0, 'expense' => 0];
         }
-        $periodByCurrency[$cur][$row['type']] = (float)$row['total'];
+        $periodByCurrency[$cur][$type] += $amount;
         
-        // Convert to base currency
-        $convertedAmount = (float)$row['total'] * $rate;
-        if ($row['type'] === 'income') {
+        // Convert to base currency using historical rate
+        $convertedAmount = $amount * $historicalRate;
+        if ($type === 'income') {
             $periodTotalIncome += $convertedAmount;
         } else {
             $periodTotalExpense += $convertedAmount;

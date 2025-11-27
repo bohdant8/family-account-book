@@ -1231,6 +1231,20 @@ body::after {
     border-color: var(--color-secondary);
 }
 
+.rate-date {
+    width: 120px;
+    padding: 4px 6px;
+    font-size: 0.75rem;
+    border: 2px solid var(--color-text);
+    border-radius: var(--radius-sm);
+    background: var(--color-paper);
+}
+
+.rate-date:focus {
+    outline: none;
+    border-color: var(--color-secondary);
+}
+
 .rate-label {
     font-size: 0.75rem;
     color: var(--color-text-light);
@@ -1333,6 +1347,89 @@ body::after {
     background: var(--color-bg);
     border-radius: var(--radius-sm);
     margin-top: var(--space-md);
+}
+
+/* Rate History Chart */
+.chart-period-selector {
+    display: flex;
+    gap: var(--space-xs);
+}
+
+.period-btn {
+    padding: 4px 12px !important;
+    font-size: 0.75rem;
+    background: var(--color-bg);
+    border: 2px solid var(--color-text);
+}
+
+.period-btn.active {
+    background: var(--color-primary);
+    color: white;
+}
+
+.rate-chart-container {
+    padding: var(--space-md);
+    min-height: 230px;
+    overflow-x: auto;
+}
+
+.rate-chart-svg {
+    display: block;
+    width: 100%;
+    min-width: 400px;
+}
+
+.rate-chart-svg .grid-line {
+    stroke: var(--color-bg);
+    stroke-width: 1;
+}
+
+.rate-chart-svg .axis-label {
+    font-size: 10px;
+    fill: var(--color-text-light);
+    text-anchor: end;
+}
+
+.rate-chart-svg .x-label {
+    text-anchor: middle;
+}
+
+.rate-chart-svg .rate-line {
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.rate-chart-svg .rate-dot {
+    cursor: pointer;
+    transition: r 0.2s ease;
+}
+
+.rate-chart-svg .rate-dot:hover {
+    r: 5;
+}
+
+.rate-chart-legend {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-lg);
+    padding: var(--space-sm) var(--space-md);
+    border-top: 2px dashed var(--color-accent);
+    margin-top: var(--space-sm);
+}
+
+.rate-legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--color-text);
 }
 
 /* Print styles */

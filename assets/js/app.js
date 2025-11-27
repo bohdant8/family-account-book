@@ -700,6 +700,155 @@ const App = {
         // Load and render exchange history
         await this.loadExchangeHistory();
         this.renderExchangeHistory();
+        
+        // Load and render rate chart
+        this.setupRateChartControls();
+        await this.loadRateChart(90);
+    },
+
+    setupRateChartControls() {
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                const days = parseInt(e.target.dataset.days);
+                await this.loadRateChart(days);
+            });
+        });
+    },
+
+    async loadRateChart(days = 90) {
+        const container = document.getElementById('rateChartContainer');
+        if (!container) return;
+        
+        container.innerHTML = '<div class="loading">Loading chart...</div>';
+        
+        const result = await this.api(`exchange.php?action=rate_chart&days=${days}`);
+        if (result.success) {
+            this.renderRateChart(result.data, result.currencies);
+        } else {
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📊</div><div class="empty-state-text">No rate data available</div></div>';
+        }
+    },
+
+    renderRateChart(data, currencies) {
+        const container = document.getElementById('rateChartContainer');
+        const legendContainer = document.getElementById('rateChartLegend');
+        if (!container || !data || data.length === 0) return;
+        
+        // Find min/max for scaling
+        let minRate = Infinity, maxRate = 0;
+        currencies.forEach(cur => {
+            data.forEach(d => {
+                if (d[cur] !== undefined) {
+                    minRate = Math.min(minRate, d[cur]);
+                    maxRate = Math.max(maxRate, d[cur]);
+                }
+            });
+        });
+        
+        // Add padding to min/max
+        const range = maxRate - minRate;
+        minRate = Math.max(0, minRate - range * 0.1);
+        maxRate = maxRate + range * 0.1;
+        
+        const chartHeight = 200;
+        const chartWidth = container.offsetWidth - 60; // Leave space for Y axis
+        const pointSpacing = Math.max(1, chartWidth / data.length);
+        
+        // Colors for different currencies
+        const colors = {
+            'USD': '#10b981',
+            'JPY': '#f59e0b',
+            'EUR': '#8b5cf6',
+            'GBP': '#ec4899'
+        };
+        
+        // Generate SVG paths for each currency
+        let pathsHtml = '';
+        let dotsHtml = '';
+        
+        currencies.forEach(cur => {
+            const color = colors[cur] || '#6366f1';
+            let pathD = '';
+            let lastY = null;
+            
+            data.forEach((d, i) => {
+                const x = 50 + i * pointSpacing;
+                const rate = d[cur];
+                if (rate !== undefined) {
+                    const y = chartHeight - ((rate - minRate) / (maxRate - minRate)) * (chartHeight - 20);
+                    if (pathD === '') {
+                        pathD = `M ${x} ${y}`;
+                    } else {
+                        pathD += ` L ${x} ${y}`;
+                    }
+                    lastY = y;
+                    
+                    // Add dots for data points (sparse for large datasets)
+                    if (data.length < 60 || i % Math.ceil(data.length / 30) === 0) {
+                        dotsHtml += `
+                            <circle cx="${x}" cy="${y}" r="3" fill="${color}" 
+                                class="rate-dot" data-date="${d.date}" data-rate="${rate}" data-currency="${cur}">
+                                <title>${d.date}: ${rate.toFixed(4)} ${cur}/CNY</title>
+                            </circle>
+                        `;
+                    }
+                }
+            });
+            
+            if (pathD) {
+                pathsHtml += `<path d="${pathD}" stroke="${color}" stroke-width="2" fill="none" class="rate-line" />`;
+            }
+        });
+        
+        // Generate Y axis labels
+        const yLabels = [];
+        for (let i = 0; i <= 4; i++) {
+            const rate = minRate + (maxRate - minRate) * (i / 4);
+            const y = chartHeight - (i / 4) * (chartHeight - 20);
+            yLabels.push(`<text x="45" y="${y + 4}" class="axis-label">${rate.toFixed(2)}</text>`);
+            yLabels.push(`<line x1="50" y1="${y}" x2="${50 + chartWidth}" y2="${y}" class="grid-line" />`);
+        }
+        
+        // Generate X axis labels (show ~6 dates)
+        const xLabels = [];
+        const labelInterval = Math.floor(data.length / 6);
+        data.forEach((d, i) => {
+            if (i % labelInterval === 0 || i === data.length - 1) {
+                const x = 50 + i * pointSpacing;
+                const dateLabel = new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                xLabels.push(`<text x="${x}" y="${chartHeight + 15}" class="axis-label x-label">${dateLabel}</text>`);
+            }
+        });
+        
+        container.innerHTML = `
+            <svg width="100%" height="${chartHeight + 30}" viewBox="0 0 ${chartWidth + 60} ${chartHeight + 30}" class="rate-chart-svg">
+                <!-- Grid lines -->
+                ${yLabels.join('')}
+                
+                <!-- Lines -->
+                ${pathsHtml}
+                
+                <!-- Data points -->
+                ${dotsHtml}
+                
+                <!-- X axis labels -->
+                ${xLabels.join('')}
+            </svg>
+        `;
+        
+        // Render legend
+        legendContainer.innerHTML = currencies.map(cur => {
+            const color = colors[cur] || '#6366f1';
+            const latestRate = data[data.length - 1]?.[cur];
+            return `
+                <span class="rate-legend-item">
+                    <span class="legend-color" style="background: ${color}"></span>
+                    ${cur}: ${latestRate?.toFixed(4) || '—'}
+                </span>
+            `;
+        }).join('');
     },
 
     renderExchangeRates() {
@@ -707,9 +856,10 @@ const App = {
         if (!container) return;
         
         const baseCurrency = this.baseCurrency || 'CNY';
+        const today = new Date().toISOString().split('T')[0];
         
         container.innerHTML = `
-            <p class="exchange-note">All amounts are converted to <strong>${baseCurrency}</strong> for total calculations. Click a rate to edit:</p>
+            <p class="exchange-note">Rates are used historically - set the <strong>effective date</strong> for accurate period calculations:</p>
             <div class="exchange-rates-grid">
                 ${Object.entries(this.currencies).map(([code, info]) => `
                     <div class="exchange-rate-item ${code === baseCurrency ? 'base-currency' : ''}" data-currency="${code}">
@@ -721,21 +871,25 @@ const App = {
                                 <span class="rate-label">1 ${code} =</span>
                                 <input type="number" class="rate-input" value="${info.rate || 1}" step="0.0001" min="0.0001" data-currency="${code}">
                                 <span class="rate-label">${baseCurrency}</span>
+                                <input type="date" class="rate-date" value="${today}" data-currency="${code}" title="Effective date">
                                 <button class="btn btn-sm btn-success rate-save" onclick="App.updateExchangeRate('${code}')">✓</button>
                             </div>`
                         }
                     </div>
                 `).join('')}
             </div>
-            <p class="exchange-disclaimer">💡 Tip: Update rates regularly for accurate calculations.</p>
+            <p class="exchange-disclaimer">💡 Historical rates are used when viewing past periods. Add rates for past dates to improve accuracy.</p>
         `;
     },
 
     async updateExchangeRate(currency) {
         const input = document.querySelector(`.rate-input[data-currency="${currency}"]`);
+        const dateInput = document.querySelector(`.rate-date[data-currency="${currency}"]`);
         if (!input) return;
         
         const rate = parseFloat(input.value);
+        const effectiveDate = dateInput?.value || new Date().toISOString().split('T')[0];
+        
         if (isNaN(rate) || rate <= 0) {
             alert('Please enter a valid positive rate');
             return;
@@ -744,7 +898,7 @@ const App = {
         const response = await fetch('api/exchange.php?action=rates', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ currency, rate })
+            body: JSON.stringify({ currency, rate, effective_date: effectiveDate })
         });
         const result = await response.json();
         

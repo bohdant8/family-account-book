@@ -161,6 +161,23 @@
                     <p class="exchange-note">All amounts are converted to CNY for total calculations.</p>
                 </div>
             </div>
+
+            <!-- Exchange Rate Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">📊 Rate History Chart</h2>
+                    <div class="chart-period-selector">
+                        <button class="btn btn-sm period-btn" data-days="30">30D</button>
+                        <button class="btn btn-sm period-btn active" data-days="90">90D</button>
+                        <button class="btn btn-sm period-btn" data-days="180">180D</button>
+                        <button class="btn btn-sm period-btn" data-days="365">1Y</button>
+                    </div>
+                </div>
+                <div id="rateChartContainer" class="rate-chart-container">
+                    <div class="loading">Loading chart...</div>
+                </div>
+                <div class="rate-chart-legend" id="rateChartLegend"></div>
+            </div>
         </div>
     </div>
 

@@ -109,6 +109,23 @@ class Database {
             )
         ");
 
+        // Create exchange rate history table (for historical rate lookups)
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS exchange_rate_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                currency VARCHAR(3) NOT NULL,
+                rate DECIMAL(10,6) NOT NULL,
+                effective_date DATE NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+        
+        // Create index for faster lookups
+        $this->pdo->exec("
+            CREATE INDEX IF NOT EXISTS idx_rate_history_lookup 
+            ON exchange_rate_history (currency, effective_date DESC)
+        ");
+
         // Initialize default exchange rates if empty
         $stmt = $this->pdo->query("SELECT COUNT(*) as count FROM exchange_rates");
         $result = $stmt->fetch();

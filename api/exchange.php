@@ -30,6 +30,9 @@ try {
         case 'history':
             getExchangeHistory();
             break;
+        case 'rate_chart':
+            getRateChartData();
+            break;
         default:
             http_response_code(400);
             echo json_encode(['error' => 'Invalid action']);
@@ -86,6 +89,7 @@ function updateRate() {
     
     $currency = strtoupper($data['currency']);
     $rate = (float)$data['rate'];
+    $effectiveDate = $data['effective_date'] ?? date('Y-m-d'); // Default to today
     
     if ($rate <= 0) {
         http_response_code(400);
@@ -93,7 +97,7 @@ function updateRate() {
         return;
     }
     
-    // Update or insert
+    // Update current rate
     $stmt = $pdo->prepare("
         INSERT INTO exchange_rates (currency, rate, updated_at) 
         VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -101,9 +105,35 @@ function updateRate() {
     ");
     $stmt->execute([$currency, $rate, $rate]);
     
+    // Also save to history for historical lookups
+    // Check if rate for this date already exists
+    $stmt = $pdo->prepare("
+        SELECT id FROM exchange_rate_history 
+        WHERE currency = ? AND effective_date = ?
+    ");
+    $stmt->execute([$currency, $effectiveDate]);
+    $existing = $stmt->fetch();
+    
+    if ($existing) {
+        // Update existing
+        $stmt = $pdo->prepare("
+            UPDATE exchange_rate_history 
+            SET rate = ? 
+            WHERE currency = ? AND effective_date = ?
+        ");
+        $stmt->execute([$rate, $currency, $effectiveDate]);
+    } else {
+        // Insert new
+        $stmt = $pdo->prepare("
+            INSERT INTO exchange_rate_history (currency, rate, effective_date)
+            VALUES (?, ?, ?)
+        ");
+        $stmt->execute([$currency, $rate, $effectiveDate]);
+    }
+    
     echo json_encode([
         'success' => true,
-        'message' => "Rate updated: 1 $currency = $rate CNY"
+        'message' => "Rate updated: 1 $currency = $rate CNY (effective: $effectiveDate)"
     ]);
 }
 
@@ -226,6 +256,95 @@ function getExchangeHistory() {
     echo json_encode([
         'success' => true,
         'data' => $exchanges
+    ]);
+}
+
+function getRateChartData() {
+    $pdo = db();
+    
+    // Get date range (default: last 90 days)
+    $days = isset($_GET['days']) ? (int)$_GET['days'] : 90;
+    $endDate = $_GET['end_date'] ?? date('Y-m-d');
+    $startDate = $_GET['start_date'] ?? date('Y-m-d', strtotime("-{$days} days", strtotime($endDate)));
+    
+    // Get all currencies except CNY (base)
+    $stmt = $pdo->query("SELECT DISTINCT currency FROM exchange_rates WHERE currency != 'CNY'");
+    $currencies = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    // Get all historical rates
+    $stmt = $pdo->prepare("
+        SELECT currency, rate, effective_date 
+        FROM exchange_rate_history 
+        WHERE effective_date <= ?
+        ORDER BY currency, effective_date ASC
+    ");
+    $stmt->execute([$endDate]);
+    $allRates = $stmt->fetchAll();
+    
+    // Organize rates by currency
+    $ratesByCurrency = [];
+    foreach ($allRates as $rate) {
+        $cur = $rate['currency'];
+        if (!isset($ratesByCurrency[$cur])) {
+            $ratesByCurrency[$cur] = [];
+        }
+        $ratesByCurrency[$cur][$rate['effective_date']] = (float)$rate['rate'];
+    }
+    
+    // Get current rates as fallback
+    $stmt = $pdo->query("SELECT currency, rate FROM exchange_rates WHERE currency != 'CNY'");
+    $currentRates = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $currentRates[$row['currency']] = (float)$row['rate'];
+    }
+    
+    // Generate chart data for each day in range
+    $chartData = [];
+    $currentDate = new DateTime($startDate);
+    $end = new DateTime($endDate);
+    
+    // Track last known rate for each currency
+    $lastKnownRates = [];
+    foreach ($currencies as $cur) {
+        // Find the most recent rate before or on start date
+        $lastKnownRates[$cur] = null;
+        if (isset($ratesByCurrency[$cur])) {
+            foreach ($ratesByCurrency[$cur] as $date => $rate) {
+                if ($date <= $startDate) {
+                    $lastKnownRates[$cur] = $rate;
+                }
+            }
+        }
+        // Use current rate if no historical data
+        if ($lastKnownRates[$cur] === null) {
+            $lastKnownRates[$cur] = $currentRates[$cur] ?? 1;
+        }
+    }
+    
+    while ($currentDate <= $end) {
+        $dateStr = $currentDate->format('Y-m-d');
+        $dayData = ['date' => $dateStr];
+        
+        foreach ($currencies as $cur) {
+            // Check if we have a rate for this date
+            if (isset($ratesByCurrency[$cur][$dateStr])) {
+                $lastKnownRates[$cur] = $ratesByCurrency[$cur][$dateStr];
+            }
+            $dayData[$cur] = $lastKnownRates[$cur];
+        }
+        
+        $chartData[] = $dayData;
+        $currentDate->modify('+1 day');
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $chartData,
+        'currencies' => $currencies,
+        'period' => [
+            'start' => $startDate,
+            'end' => $endDate
+        ]
     ]);
 }
 
