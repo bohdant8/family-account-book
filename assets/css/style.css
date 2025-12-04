@@ -835,6 +835,10 @@ body::after {
     padding: var(--space-lg);
 }
 
+.chart-container canvas {
+    max-height: 300px;
+}
+
 /* Loading state */
 .loading {
     display: flex;
@@ -992,82 +996,12 @@ body::after {
 .monthly-chart-container {
     padding: var(--space-md) 0;
     overflow-x: auto;
-}
-
-.monthly-chart {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: var(--space-xs);
-    height: 250px;
-    padding: var(--space-md);
-    background: var(--color-bg);
-    border-radius: var(--radius-md);
-    border: 2px dashed var(--color-text);
-}
-
-.month-bar-group {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-xs);
-    min-width: 50px;
-}
-
-.month-bars {
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 180px;
-    width: 100%;
-    justify-content: center;
-}
-
-.month-bar {
-    width: 16px;
-    min-height: 4px;
-    border-radius: 4px 4px 0 0;
-    transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-    cursor: pointer;
     position: relative;
+    height: 300px;
 }
 
-.month-bar.income {
-    background: var(--color-income);
-}
-
-.month-bar.expense {
-    background: var(--color-expense);
-}
-
-.month-bar:hover {
-    transform: scaleY(1.05);
-    filter: brightness(1.1);
-}
-
-.month-bar:hover::after {
-    content: attr(data-amount);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--color-text);
-    color: white;
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-    font-size: 0.75rem;
-    font-weight: 600;
-    white-space: nowrap;
-    margin-bottom: 4px;
-    z-index: 10;
-}
-
-.month-label {
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: var(--color-text);
-    text-transform: uppercase;
+.monthly-chart-container canvas {
+    max-height: 300px;
 }
 
 .year-selector {
@@ -1371,41 +1305,12 @@ body::after {
     padding: var(--space-md);
     min-height: 230px;
     overflow-x: auto;
+    position: relative;
+    height: 250px;
 }
 
-.rate-chart-svg {
-    display: block;
-    width: 100%;
-    min-width: 400px;
-}
-
-.rate-chart-svg .grid-line {
-    stroke: var(--color-bg);
-    stroke-width: 1;
-}
-
-.rate-chart-svg .axis-label {
-    font-size: 10px;
-    fill: var(--color-text-light);
-    text-anchor: end;
-}
-
-.rate-chart-svg .x-label {
-    text-anchor: middle;
-}
-
-.rate-chart-svg .rate-line {
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.rate-chart-svg .rate-dot {
-    cursor: pointer;
-    transition: r 0.2s ease;
-}
-
-.rate-chart-svg .rate-dot:hover {
-    r: 5;
+.rate-chart-container canvas {
+    max-height: 250px;
 }
 
 .rate-chart-legend {

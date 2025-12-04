@@ -30,6 +30,14 @@ const App = {
         editingTransaction: null
     },
 
+    // Chart.js instances storage
+    charts: {
+        monthly: null,
+        expenseCategory: null,
+        incomeCategory: null,
+        rateChart: null
+    },
+
     // Initialize application
     async init() {
         // Set default date filter to current month
@@ -584,50 +592,93 @@ const App = {
         const data = this.state.monthlyData;
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         
-        // Find max value for scaling
-        let maxValue = 0;
-        for (const [month, values] of Object.entries(data)) {
-            maxValue = Math.max(maxValue, values.income || 0, values.expense || 0);
+        // Prepare data for Chart.js
+        const labels = months;
+        const incomeData = [];
+        const expenseData = [];
+        
+        for (let i = 1; i <= 12; i++) {
+            const monthKey = String(i).padStart(2, '0');
+            const monthData = data[monthKey] || { income: 0, expense: 0 };
+            incomeData.push(monthData.income || 0);
+            expenseData.push(monthData.expense || 0);
         }
         
-        // If no data, show empty state
-        if (maxValue === 0) {
+        // Check if we have any data
+        const hasData = incomeData.some(v => v > 0) || expenseData.some(v => v > 0);
+        
+        if (!hasData) {
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">📊</div>
                     <div class="empty-state-text">No data for ${this.state.selectedYear}</div>
                 </div>
             `;
+            // Destroy existing chart if any
+            if (this.charts.monthly) {
+                this.charts.monthly.destroy();
+                this.charts.monthly = null;
+            }
             return;
         }
         
-        // Render chart
-        container.innerHTML = `
-            <div class="monthly-chart">
-                ${months.map((month, index) => {
-                    const monthKey = String(index + 1).padStart(2, '0');
-                    const monthData = data[monthKey] || { income: 0, expense: 0 };
-                    const incomeHeight = maxValue > 0 ? (monthData.income / maxValue) * 160 : 0;
-                    const expenseHeight = maxValue > 0 ? (monthData.expense / maxValue) * 160 : 0;
-                    
-                    return `
-                        <div class="month-bar-group">
-                            <div class="month-bars">
-                                <div class="month-bar income" 
-                                     style="height: ${Math.max(incomeHeight, 4)}px"
-                                     data-amount="${this.formatCurrency(monthData.income, 'CNY')}">
-                                </div>
-                                <div class="month-bar expense" 
-                                     style="height: ${Math.max(expenseHeight, 4)}px"
-                                     data-amount="${this.formatCurrency(monthData.expense, 'CNY')}">
-                                </div>
-                            </div>
-                            <div class="month-label">${month}</div>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-        `;
+        // Create canvas if it doesn't exist
+        if (!container.querySelector('canvas')) {
+            container.innerHTML = '<canvas></canvas>';
+        }
+        
+        const ctx = container.querySelector('canvas').getContext('2d');
+        
+        // Destroy existing chart if any
+        if (this.charts.monthly) {
+            this.charts.monthly.destroy();
+        }
+        
+        // Create new Chart.js bar chart
+        this.charts.monthly = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Income',
+                    data: incomeData,
+                    backgroundColor: '#00b894',
+                    borderColor: '#00b894',
+                    borderWidth: 1
+                }, {
+                    label: 'Expense',
+                    data: expenseData,
+                    backgroundColor: '#ff6b6b',
+                    borderColor: '#ff6b6b',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => {
+                                return `${context.dataset.label}: ${this.formatCurrency(context.parsed.y, 'CNY')}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: (value) => this.formatCurrency(value, 'CNY')
+                        }
+                    }
+                }
+            }
+        });
     },
 
     async loadCategoryStats() {
@@ -660,33 +711,83 @@ const App = {
                     <div class="empty-state-text">No data for this period</div>
                 </div>
             `;
+            // Destroy existing chart if any
+            const chartKey = containerId === 'expenseChart' ? 'expenseCategory' : 'incomeCategory';
+            if (this.charts[chartKey]) {
+                this.charts[chartKey].destroy();
+                this.charts[chartKey] = null;
+            }
             return;
         }
         
         const total = data.reduce((sum, item) => sum + parseFloat(item.total), 0);
         
-        container.innerHTML = `
-            <h3 class="card-title" style="margin-bottom: var(--space-lg);">${title}</h3>
-            <div style="display: flex; flex-direction: column; gap: var(--space-md);">
-                ${data.map(item => {
-                    const percent = (item.total / total * 100).toFixed(1);
-                    return `
-                        <div>
-                            <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-xs);">
-                                <span>${item.icon} ${item.name}</span>
-                                <span style="font-weight: 600;">${this.formatCurrency(item.total, 'CNY')} (${percent}%)</span>
-                            </div>
-                            <div style="background: var(--color-bg); border-radius: 4px; height: 8px; overflow: hidden;">
-                                <div style="background: ${item.color}; height: 100%; width: ${percent}%; transition: width 0.3s ease;"></div>
-                            </div>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-            <div style="margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 2px dashed var(--color-accent); text-align: right;">
-                <strong>Total: ${this.formatCurrency(total, 'CNY')}</strong>
-            </div>
-        `;
+        // Prepare data for Chart.js
+        const labels = data.map(item => `${item.icon} ${item.name}`);
+        const chartData = data.map(item => parseFloat(item.total));
+        const backgroundColors = data.map(item => item.color);
+        
+        // Determine which chart instance to use
+        const chartKey = containerId === 'expenseChart' ? 'expenseCategory' : 'incomeCategory';
+        
+        // Create canvas wrapper if needed
+        if (!container.querySelector('canvas')) {
+            container.innerHTML = `
+                <h3 class="card-title" style="margin-bottom: var(--space-lg);">${title}</h3>
+                <div style="position: relative; height: 300px;">
+                    <canvas></canvas>
+                </div>
+                <div style="margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 2px dashed var(--color-accent); text-align: right;">
+                    <strong>Total: ${this.formatCurrency(total, 'CNY')}</strong>
+                </div>
+            `;
+        } else {
+            // Update title and total if they exist
+            const titleEl = container.querySelector('h3');
+            if (titleEl) titleEl.textContent = title;
+            const totalEl = container.querySelector('strong');
+            if (totalEl) totalEl.textContent = `Total: ${this.formatCurrency(total, 'CNY')}`;
+        }
+        
+        const ctx = container.querySelector('canvas').getContext('2d');
+        
+        // Destroy existing chart if any
+        if (this.charts[chartKey]) {
+            this.charts[chartKey].destroy();
+        }
+        
+        // Create new Chart.js doughnut chart
+        this.charts[chartKey] = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: chartData,
+                    backgroundColor: backgroundColors,
+                    borderWidth: 2,
+                    borderColor: '#ffffff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'right'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => {
+                                const value = context.parsed;
+                                const percent = ((value / total) * 100).toFixed(1);
+                                return `${context.label}: ${this.formatCurrency(value, 'CNY')} (${percent}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
     },
 
     async renderSettings() {
@@ -734,27 +835,14 @@ const App = {
     renderRateChart(data, currencies) {
         const container = document.getElementById('rateChartContainer');
         const legendContainer = document.getElementById('rateChartLegend');
-        if (!container || !data || data.length === 0) return;
-        
-        // Find min/max for scaling
-        let minRate = Infinity, maxRate = 0;
-        currencies.forEach(cur => {
-            data.forEach(d => {
-                if (d[cur] !== undefined) {
-                    minRate = Math.min(minRate, d[cur]);
-                    maxRate = Math.max(maxRate, d[cur]);
-                }
-            });
-        });
-        
-        // Add padding to min/max
-        const range = maxRate - minRate;
-        minRate = Math.max(0, minRate - range * 0.1);
-        maxRate = maxRate + range * 0.1;
-        
-        const chartHeight = 200;
-        const chartWidth = container.offsetWidth - 60; // Leave space for Y axis
-        const pointSpacing = Math.max(1, chartWidth / data.length);
+        if (!container || !data || data.length === 0) {
+            // Destroy existing chart if any
+            if (this.charts.rateChart) {
+                this.charts.rateChart.destroy();
+                this.charts.rateChart = null;
+            }
+            return;
+        }
         
         // Colors for different currencies
         const colors = {
@@ -764,81 +852,82 @@ const App = {
             'GBP': '#ec4899'
         };
         
-        // Generate SVG paths for each currency
-        let pathsHtml = '';
-        let dotsHtml = '';
-        
-        currencies.forEach(cur => {
-            const color = colors[cur] || '#6366f1';
-            let pathD = '';
-            let lastY = null;
-            
-            data.forEach((d, i) => {
-                const x = 50 + i * pointSpacing;
-                const rate = d[cur];
-                if (rate !== undefined) {
-                    const y = chartHeight - ((rate - minRate) / (maxRate - minRate)) * (chartHeight - 20);
-                    if (pathD === '') {
-                        pathD = `M ${x} ${y}`;
-                    } else {
-                        pathD += ` L ${x} ${y}`;
-                    }
-                    lastY = y;
-                    
-                    // Add dots for data points (sparse for large datasets)
-                    if (data.length < 60 || i % Math.ceil(data.length / 30) === 0) {
-                        dotsHtml += `
-                            <circle cx="${x}" cy="${y}" r="3" fill="${color}" 
-                                class="rate-dot" data-date="${d.date}" data-rate="${rate}" data-currency="${cur}">
-                                <title>${d.date}: ${rate.toFixed(4)} ${cur}/CNY</title>
-                            </circle>
-                        `;
-                    }
-                }
-            });
-            
-            if (pathD) {
-                pathsHtml += `<path d="${pathD}" stroke="${color}" stroke-width="2" fill="none" class="rate-line" />`;
-            }
+        // Prepare data for Chart.js
+        const labels = data.map(d => {
+            const date = new Date(d.date);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         });
         
-        // Generate Y axis labels
-        const yLabels = [];
-        for (let i = 0; i <= 4; i++) {
-            const rate = minRate + (maxRate - minRate) * (i / 4);
-            const y = chartHeight - (i / 4) * (chartHeight - 20);
-            yLabels.push(`<text x="45" y="${y + 4}" class="axis-label">${rate.toFixed(2)}</text>`);
-            yLabels.push(`<line x1="50" y1="${y}" x2="${50 + chartWidth}" y2="${y}" class="grid-line" />`);
+        // Create datasets for each currency
+        const datasets = currencies.map(cur => ({
+            label: cur,
+            data: data.map(d => d[cur] !== undefined ? d[cur] : null),
+            borderColor: colors[cur] || '#6366f1',
+            backgroundColor: colors[cur] || '#6366f1',
+            borderWidth: 2,
+            fill: false,
+            tension: 0.1,
+            pointRadius: data.length > 60 ? 0 : 3,
+            pointHoverRadius: 5
+        }));
+        
+        // Create canvas if it doesn't exist
+        if (!container.querySelector('canvas')) {
+            container.innerHTML = '<canvas></canvas>';
         }
         
-        // Generate X axis labels (show ~6 dates)
-        const xLabels = [];
-        const labelInterval = Math.floor(data.length / 6);
-        data.forEach((d, i) => {
-            if (i % labelInterval === 0 || i === data.length - 1) {
-                const x = 50 + i * pointSpacing;
-                const dateLabel = new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                xLabels.push(`<text x="${x}" y="${chartHeight + 15}" class="axis-label x-label">${dateLabel}</text>`);
+        const ctx = container.querySelector('canvas').getContext('2d');
+        
+        // Destroy existing chart if any
+        if (this.charts.rateChart) {
+            this.charts.rateChart.destroy();
+        }
+        
+        // Create new Chart.js line chart
+        this.charts.rateChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        display: false // We'll use custom legend
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => {
+                                return `${context.dataset.label}: ${context.parsed.y.toFixed(4)} ${context.dataset.label}/CNY`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        ticks: {
+                            maxTicksLimit: 6
+                        }
+                    },
+                    y: {
+                        display: true,
+                        beginAtZero: false,
+                        ticks: {
+                            callback: (value) => value.toFixed(2)
+                        }
+                    }
+                }
             }
         });
         
-        container.innerHTML = `
-            <svg width="100%" height="${chartHeight + 30}" viewBox="0 0 ${chartWidth + 60} ${chartHeight + 30}" class="rate-chart-svg">
-                <!-- Grid lines -->
-                ${yLabels.join('')}
-                
-                <!-- Lines -->
-                ${pathsHtml}
-                
-                <!-- Data points -->
-                ${dotsHtml}
-                
-                <!-- X axis labels -->
-                ${xLabels.join('')}
-            </svg>
-        `;
-        
-        // Render legend
+        // Render custom legend
         legendContainer.innerHTML = currencies.map(cur => {
             const color = colors[cur] || '#6366f1';
             const latestRate = data[data.length - 1]?.[cur];
