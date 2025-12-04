@@ -890,28 +890,6 @@ body::after {
     display: none !important;
 }
 
-.text-center {
-    text-align: center;
-}
-
-.text-right {
-    text-align: right;
-}
-
-.mt-lg {
-    margin-top: var(--space-lg);
-}
-
-.mb-lg {
-    margin-bottom: var(--space-lg);
-}
-
-/* Fun progress bars for reports */
-.chart-container > div > div:last-child > div {
-    border-radius: var(--radius-full);
-    transition: width 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-}
-
 /* Responsive */
 @media (max-width: 768px) {
     .app-title {
