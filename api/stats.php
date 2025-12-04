@@ -32,12 +32,6 @@ try {
         case 'category':
             getCategoryStats();
             break;
-        case 'member':
-            getMemberStats();
-            break;
-        case 'trend':
-            getTrend();
-            break;
         default:
             http_response_code(400);
             echo json_encode(['error' => 'Invalid action']);
@@ -317,86 +311,4 @@ function getCategoryStats() {
     ]);
 }
 
-function getMemberStats() {
-    $pdo = db();
-    
-    $startDate = $_GET['start_date'] ?? date('Y-m-01');
-    $endDate = $_GET['end_date'] ?? date('Y-m-t');
-    
-    $stmt = $pdo->prepare("
-        SELECT 
-            COALESCE(t.member, 'Unassigned') as member,
-            c.type,
-            SUM(t.amount) as total,
-            COUNT(t.id) as count
-        FROM transactions t
-        JOIN categories c ON t.category_id = c.id
-        WHERE t.transaction_date BETWEEN ? AND ?
-        GROUP BY t.member, c.type
-        ORDER BY total DESC
-    ");
-    $stmt->execute([$startDate, $endDate]);
-    $results = $stmt->fetchAll();
-    
-    // Reorganize by member
-    $members = [];
-    foreach ($results as $row) {
-        $name = $row['member'];
-        if (!isset($members[$name])) {
-            $members[$name] = ['income' => 0, 'expense' => 0, 'count' => 0];
-        }
-        $members[$name][$row['type']] = (float)$row['total'];
-        $members[$name]['count'] += (int)$row['count'];
-    }
-    
-    echo json_encode([
-        'success' => true,
-        'data' => $members,
-        'period' => ['start' => $startDate, 'end' => $endDate]
-    ]);
-}
-
-function getTrend() {
-    $pdo = db();
-    
-    $days = isset($_GET['days']) ? (int)$_GET['days'] : 30;
-    $startDate = date('Y-m-d', strtotime("-$days days"));
-    $endDate = date('Y-m-d');
-    
-    $stmt = $pdo->prepare("
-        SELECT 
-            t.transaction_date as date,
-            c.type,
-            SUM(t.amount) as total
-        FROM transactions t
-        JOIN categories c ON t.category_id = c.id
-        WHERE t.transaction_date BETWEEN ? AND ?
-        GROUP BY t.transaction_date, c.type
-        ORDER BY t.transaction_date
-    ");
-    $stmt->execute([$startDate, $endDate]);
-    $results = $stmt->fetchAll();
-    
-    // Initialize daily data
-    $daily = [];
-    $current = strtotime($startDate);
-    $end = strtotime($endDate);
-    
-    while ($current <= $end) {
-        $date = date('Y-m-d', $current);
-        $daily[$date] = ['income' => 0, 'expense' => 0];
-        $current = strtotime('+1 day', $current);
-    }
-    
-    // Fill in actual data
-    foreach ($results as $row) {
-        $daily[$row['date']][$row['type']] = (float)$row['total'];
-    }
-    
-    echo json_encode([
-        'success' => true,
-        'data' => $daily,
-        'period' => ['start' => $startDate, 'end' => $endDate]
-    ]);
-}
 
