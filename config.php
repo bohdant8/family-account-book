@@ -24,6 +24,7 @@ define('CURRENCIES', [
     'JPY' => ['symbol' => '¥', 'name' => 'Japanese Yen', 'rate' => 0.05],    // 1 JPY = 0.05 CNY
     'USD' => ['symbol' => '$', 'name' => 'US Dollar', 'rate' => 7.25],       // 1 USD = 7.25 CNY
     'EUR' => ['symbol' => '€', 'name' => 'Euro', 'rate' => 7.9],             // 1 EUR = 7.9 CNY
+    'GBP' => ['symbol' => '£', 'name' => 'UK Pound', 'rate' => 9.3],         // 1 GBP = 9.3 CNY
 ]);
 
 // Error reporting (set to 0 in production)
