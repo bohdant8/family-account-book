@@ -47,8 +47,8 @@ try {
  * Falls back to current rate if no history exists
  */
 function getHistoricalRate($pdo, $currency, $date, $currentRates) {
-    // CNY is always 1
-    if ($currency === 'CNY') {
+    // Base currency is always 1
+    if ($currency === BASE_CURRENCY) {
         return 1.0;
     }
     
