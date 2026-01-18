@@ -15,16 +15,16 @@ define('DB_PATH', __DIR__ . '/data/accountbook.db');
 date_default_timezone_set('Asia/Shanghai');
 
 // Base currency for total calculations
-define('BASE_CURRENCY', 'CNY');
+define('BASE_CURRENCY', 'GBP');
 
 // Currency settings - Multiple currencies supported
-// Exchange rates are relative to CNY (how much 1 unit of foreign currency = in CNY)
+// Exchange rates are relative to GBP (how much 1 unit of foreign currency = in GBP)
 define('CURRENCIES', [
-    'CNY' => ['symbol' => '¥', 'name' => 'Chinese Yuan', 'rate' => 1],
-    'JPY' => ['symbol' => '¥', 'name' => 'Japanese Yen', 'rate' => 0.05],    // 1 JPY = 0.05 CNY
-    'USD' => ['symbol' => '$', 'name' => 'US Dollar', 'rate' => 7.25],       // 1 USD = 7.25 CNY
-    'EUR' => ['symbol' => '€', 'name' => 'Euro', 'rate' => 7.9],             // 1 EUR = 7.9 CNY
-    'GBP' => ['symbol' => '£', 'name' => 'UK Pound', 'rate' => 9.3],         // 1 GBP = 9.3 CNY
+    'GBP' => ['symbol' => '£', 'name' => 'UK Pound', 'rate' => 1],           // 1 GBP = 1 GBP (base)
+    'CNY' => ['symbol' => '¥', 'name' => 'Chinese Yuan', 'rate' => 0.1075],  // 1 CNY = 0.1075 GBP
+    'JPY' => ['symbol' => '¥', 'name' => 'Japanese Yen', 'rate' => 0.00538], // 1 JPY = 0.00538 GBP
+    'USD' => ['symbol' => '$', 'name' => 'US Dollar', 'rate' => 0.78],       // 1 USD = 0.78 GBP
+    'EUR' => ['symbol' => '€', 'name' => 'Euro', 'rate' => 0.85],            // 1 EUR = 0.85 GBP
 ]);
 
 // Error reporting (set to 0 in production)
