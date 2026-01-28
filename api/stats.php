@@ -74,20 +74,8 @@ function getSummary() {
     $pdo = db();
     $baseCurrency = BASE_CURRENCY;
     
-    // Get exchange rates from database
-    $stmt = $pdo->query("SELECT currency, rate FROM exchange_rates");
-    $ratesResult = $stmt->fetchAll();
-    $currencies = [];
-    foreach ($ratesResult as $row) {
-        $currencies[$row['currency']] = [
-            'symbol' => $row['currency'] === 'USD' ? '$' : '¥',
-            'rate' => (float)$row['rate']
-        ];
-    }
-    // Fallback to config if no rates in DB
-    if (empty($currencies)) {
-        $currencies = CURRENCIES;
-    }
+    // Use config currencies (rates are relative to BASE_CURRENCY)
+    $currencies = CURRENCIES;
     
     $startDate = $_GET['start_date'] ?? date('Y-m-01');
     $endDate = $_GET['end_date'] ?? date('Y-m-t');
