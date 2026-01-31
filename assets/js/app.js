@@ -951,10 +951,13 @@ const App = {
         const baseCurrency = this.baseCurrency || 'GBP';
         const today = new Date().toISOString().split('T')[0];
         
+        const excludedCurrencies = ['CNY', 'JPY'];
         container.innerHTML = `
             <p class="exchange-note">Rates are used historically - set the <strong>effective date</strong> for accurate period calculations:</p>
             <div class="exchange-rates-grid">
-                ${Object.entries(this.currencies).map(([code, info]) => `
+                ${Object.entries(this.currencies)
+                    .filter(([code]) => !excludedCurrencies.includes(code))
+                    .map(([code, info]) => `
                     <div class="exchange-rate-item ${code === baseCurrency ? 'base-currency' : ''}" data-currency="${code}">
                         <span class="rate-currency">${code}</span>
                         <span class="rate-name">${info.name || code}</span>

@@ -1,3 +1,4 @@
+<?php require_once __DIR__ . '/config.php'; ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,7 +8,7 @@
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📒</text></svg>">
 </head>
-<body>
+<body data-base-currency="<?= htmlspecialchars(BASE_CURRENCY) ?>">
     <div class="app-container">
         <!-- Header -->
         <header class="app-header">
@@ -47,15 +48,15 @@
             <div class="summary-grid">
                 <div class="summary-card income">
                     <div class="summary-label">📅 Period Income</div>
-                    <div class="summary-value" id="summaryIncome">¥0.00</div>
+                    <div class="summary-value" id="summaryIncome"><?= CURRENCIES[BASE_CURRENCY]['symbol'] ?? '£' ?>0.00</div>
                 </div>
                 <div class="summary-card expense">
                     <div class="summary-label">📅 Period Expense</div>
-                    <div class="summary-value" id="summaryExpense">¥0.00</div>
+                    <div class="summary-value" id="summaryExpense"><?= CURRENCIES[BASE_CURRENCY]['symbol'] ?? '£' ?>0.00</div>
                 </div>
                 <div class="summary-card balance">
                     <div class="summary-label">💰 Total Balance</div>
-                    <div class="summary-value" id="summaryBalance">¥0.00</div>
+                    <div class="summary-value" id="summaryBalance"><?= CURRENCIES[BASE_CURRENCY]['symbol'] ?? '£' ?>0.00</div>
                 </div>
             </div>
 
@@ -158,7 +159,7 @@
                     <h2 class="card-title">📈 Exchange Rates</h2>
                 </div>
                 <div id="exchangeRatesList" class="exchange-rates-info">
-                    <p class="exchange-note">All amounts are converted to CNY for total calculations.</p>
+                    <p class="exchange-note">All amounts are converted to <?= BASE_CURRENCY ?> for total calculations.</p>
                 </div>
             </div>
 
@@ -213,9 +214,9 @@
                     <div class="form-group">
                         <label class="form-label" for="transactionCurrency">Currency</label>
                         <select id="transactionCurrency" class="form-select">
-                            <option value="CNY">CNY (¥)</option>
-                            <option value="JPY">JPY (¥)</option>
-                            <option value="USD">USD ($)</option>
+                            <?php foreach (CURRENCIES as $code => $c): ?>
+                            <option value="<?= $code ?>" <?= $code === BASE_CURRENCY ? 'selected' : '' ?>><?= $code ?> (<?= htmlspecialchars($c['symbol']) ?>)</option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                 </div>
@@ -258,26 +259,30 @@
             
             <form id="exchangeForm">
                 <div class="exchange-preview">
-                    <span id="exchangePreviewFrom">0.00 CNY</span>
+                    <?php
+                    $otherCurrencies = array_values(array_filter(array_keys(CURRENCIES), fn($c) => $c !== BASE_CURRENCY));
+                    $exchangeToDefault = in_array('USD', $otherCurrencies) ? 'USD' : ($otherCurrencies[0] ?? BASE_CURRENCY);
+                    ?>
+                    <span id="exchangePreviewFrom">0.00 <?= BASE_CURRENCY ?></span>
                     <span class="exchange-arrow">→</span>
-                    <span id="exchangePreviewTo">0.00 USD</span>
+                    <span id="exchangePreviewTo">0.00 <?= $exchangeToDefault ?></span>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">From Currency</label>
                         <select id="exchangeFromCurrency" class="form-select">
-                            <option value="CNY">CNY (¥)</option>
-                            <option value="JPY">JPY (¥)</option>
-                            <option value="USD">USD ($)</option>
+                            <?php foreach (CURRENCIES as $code => $c): ?>
+                            <option value="<?= $code ?>" <?= $code === BASE_CURRENCY ? 'selected' : '' ?>><?= $code ?> (<?= htmlspecialchars($c['symbol']) ?>)</option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="form-group">
                         <label class="form-label">To Currency</label>
                         <select id="exchangeToCurrency" class="form-select">
-                            <option value="CNY">CNY (¥)</option>
-                            <option value="JPY">JPY (¥)</option>
-                            <option value="USD" selected>USD ($)</option>
+                            <?php foreach (CURRENCIES as $code => $c): ?>
+                            <option value="<?= $code ?>" <?= $code === $exchangeToDefault ? 'selected' : '' ?>><?= $code ?> (<?= htmlspecialchars($c['symbol']) ?>)</option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                 </div>
@@ -311,7 +316,7 @@
                 </div>
 
                 <div class="exchange-rate-info" id="currentRateInfo">
-                    Current rate: 1 CNY = 1.00 CNY
+                    Current rate: 1 <?= BASE_CURRENCY ?> = 1.00 <?= BASE_CURRENCY ?>
                 </div>
                 
                 <div class="modal-footer">
