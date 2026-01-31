@@ -5,11 +5,13 @@
 const App = {
     // Currency configuration (rates are updated from server)
     currencies: {
-        CNY: { symbol: '¥', name: 'Chinese Yuan', rate: 1 },
-        JPY: { symbol: '¥', name: 'Japanese Yen', rate: 0.05 },
-        USD: { symbol: '$', name: 'US Dollar', rate: 7.25 }
+        GBP: { symbol: '£', name: 'UK Pound', rate: 1 },
+        CNY: { symbol: '¥', name: 'Chinese Yuan', rate: 0.1075 },
+        JPY: { symbol: '¥', name: 'Japanese Yen', rate: 0.00538 },
+        USD: { symbol: '$', name: 'US Dollar', rate: 0.78 },
+        EUR: { symbol: '€', name: 'Euro', rate: 0.85 }
     },
-    baseCurrency: 'CNY',
+    baseCurrency: document.body?.dataset?.baseCurrency || 'GBP',
 
     // Application state
     state: {
@@ -40,6 +42,8 @@ const App = {
 
     // Initialize application
     async init() {
+        // Use base currency from page (set by server config)
+        this.baseCurrency = document.body?.dataset?.baseCurrency || this.baseCurrency;
         // Set default date filter to current month
         const now = new Date();
         this.state.filters.startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
@@ -285,7 +289,7 @@ const App = {
             title.textContent = 'Edit Transaction';
             document.getElementById('transactionId').value = transaction.id;
             document.getElementById('transactionAmount').value = transaction.amount;
-            document.getElementById('transactionCurrency').value = transaction.currency || 'CNY';
+            document.getElementById('transactionCurrency').value = transaction.currency || this.baseCurrency;
             document.getElementById('transactionDescription').value = transaction.description || '';
             document.getElementById('transactionDate').value = transaction.transaction_date;
             document.getElementById('transactionMember').value = transaction.member || '';
@@ -300,7 +304,7 @@ const App = {
             title.textContent = 'Add Transaction';
             document.getElementById('transactionId').value = '';
             document.getElementById('transactionDate').value = new Date().toISOString().split('T')[0];
-            document.getElementById('transactionCurrency').value = 'CNY';
+            document.getElementById('transactionCurrency').value = this.baseCurrency;
             
             // Default to expense
             document.querySelectorAll('.type-toggle-btn').forEach(b => {
@@ -447,7 +451,7 @@ const App = {
             all_time_total = {}
         } = this.state.summary;
         
-        const baseCurrency = this.baseCurrency || 'CNY';
+        const baseCurrency = this.baseCurrency || 'GBP';
         
         // Render period income by currency
         const incomeContainer = document.getElementById('summaryIncome');
@@ -664,7 +668,7 @@ const App = {
                     tooltip: {
                         callbacks: {
                             label: (context) => {
-                                return `${context.dataset.label}: ${this.formatCurrency(context.parsed.y, 'CNY')}`;
+                                return `${context.dataset.label}: ${this.formatCurrency(context.parsed.y, this.baseCurrency)}`;
                             }
                         }
                     }
@@ -673,7 +677,7 @@ const App = {
                     y: {
                         beginAtZero: true,
                         ticks: {
-                            callback: (value) => this.formatCurrency(value, 'CNY')
+                            callback: (value) => this.formatCurrency(value, this.baseCurrency)
                         }
                     }
                 }
@@ -738,7 +742,7 @@ const App = {
                     <canvas></canvas>
                 </div>
                 <div style="margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 2px dashed var(--color-accent); text-align: right;">
-                    <strong>Total: ${this.formatCurrency(total, 'CNY')}</strong>
+                    <strong>Total: ${this.formatCurrency(total, this.baseCurrency)}</strong>
                 </div>
             `;
         } else {
@@ -746,7 +750,7 @@ const App = {
             const titleEl = container.querySelector('h3');
             if (titleEl) titleEl.textContent = title;
             const totalEl = container.querySelector('strong');
-            if (totalEl) totalEl.textContent = `Total: ${this.formatCurrency(total, 'CNY')}`;
+            if (totalEl) totalEl.textContent = `Total: ${this.formatCurrency(total, this.baseCurrency)}`;
         }
         
         const ctx = container.querySelector('canvas').getContext('2d');
@@ -781,7 +785,7 @@ const App = {
                             label: (context) => {
                                 const value = context.parsed;
                                 const percent = ((value / total) * 100).toFixed(1);
-                                return `${context.label}: ${this.formatCurrency(value, 'CNY')} (${percent}%)`;
+                                return `${context.label}: ${this.formatCurrency(value, this.baseCurrency)} (${percent}%)`;
                             }
                         }
                     }
@@ -904,7 +908,7 @@ const App = {
                     tooltip: {
                         callbacks: {
                             label: (context) => {
-                                return `${context.dataset.label}: ${context.parsed.y.toFixed(4)} ${context.dataset.label}/CNY`;
+                                return `${context.dataset.label}: ${context.parsed.y.toFixed(4)} ${context.dataset.label}/${this.baseCurrency}`;
                             }
                         }
                     }
@@ -944,7 +948,7 @@ const App = {
         const container = document.getElementById('exchangeRatesList');
         if (!container) return;
         
-        const baseCurrency = this.baseCurrency || 'CNY';
+        const baseCurrency = this.baseCurrency || 'GBP';
         const today = new Date().toISOString().split('T')[0];
         
         container.innerHTML = `
@@ -1073,9 +1077,9 @@ const App = {
         const fromRate = this.currencies[fromCurrency]?.rate || 1;
         const toRate = this.currencies[toCurrency]?.rate || 1;
         
-        // Convert: from -> CNY -> to
-        const cnyAmount = fromAmount * fromRate;
-        const toAmount = cnyAmount / toRate;
+        // Convert: from -> base currency -> to
+        const baseAmount = fromAmount * fromRate;
+        const toAmount = baseAmount / toRate;
         
         document.getElementById('exchangeToAmount').value = toAmount.toFixed(2);
         document.getElementById('exchangePreviewFrom').textContent = `${fromAmount.toFixed(2)} ${fromCurrency}`;
@@ -1195,8 +1199,9 @@ const App = {
     },
 
     // Utility functions
-    formatCurrency(amount, currency = 'CNY') {
-        const config = this.currencies[currency] || this.currencies.CNY;
+    formatCurrency(amount, currency) {
+        currency = currency || this.baseCurrency;
+        const config = this.currencies[currency] || this.currencies[this.baseCurrency] || { symbol: currency, name: currency };
         const value = parseFloat(amount);
         
         // JPY doesn't use decimal places
